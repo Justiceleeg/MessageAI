@@ -23,13 +23,25 @@
 - In group chats, the "read" status indicates when all recipients have read the message (MVP scope).
 - The system correctly updates message status in Firestore when a message is delivered or read.
 
-## Story 3.3: Implement Presence & Notifications
+## Story 3.3: Implement User Presence Indicators
 
-**As a** user, **I want to** see if other users are online and receive notifications for new messages, **so that** I can manage my communication effectively.
+**As a** user, **I want to** see if other users are online or offline, **so that** I know when someone is available to chat.
 
 **Acceptance Criteria**
 - The app displays an indicator showing whether other users are currently online or offline (FR7).
-- The presence status updates in (near) real-time.
+- The presence status updates in (near) real-time when users go online or offline.
+- In 1:1 chats, the ChatView displays "Online" or "Last seen X ago" subtitle based on the other user's status.
+- In group chats, the ChatView displays a green dot to the right of each sender's name if they are currently online.
+- The app automatically sets the user's status to online when active and offline when backgrounded/disconnected.
+- Presence uses Firebase Realtime Database with automatic disconnect detection for reliability.
+
+## Story 3.4: Implement Push Notifications
+
+**As a** user, **I want to** receive push notifications for new messages when I'm not viewing a conversation, **so that** I don't miss important communications.
+
+**Acceptance Criteria**
 - When a new message is received for a conversation the user is not currently viewing, a push notification is delivered to the device (FR8).
-- This notification works reliably when the app is in the foreground (MVP scope).
+- Notifications work reliably when the app is in the foreground (MVP scope).
+- Tapping a notification navigates the user to the relevant conversation.
 - A Firebase Cloud Function is implemented and deployed to trigger FCM notifications based on new messages in Firestore.
+- FCM device tokens are properly registered, refreshed, and synced to Firestore.
