@@ -9,6 +9,12 @@ import Foundation
 import SwiftData
 
 /// SwiftData entity for local message caching
+/// 
+/// Status Values:
+/// - "sending": Message is being sent (optimistic UI, not yet confirmed by Firestore)
+/// - "sent": Message confirmed written to Firestore, but not yet delivered to recipient
+/// - "delivered": Message delivered to recipient (recipient's app received it)
+/// - "read": Message read by recipient (recipient viewed it in ChatView)
 @Model
 final class MessageEntity {
     @Attribute(.unique) var messageId: String
@@ -16,16 +22,18 @@ final class MessageEntity {
     var text: String
     var timestamp: Date
     var status: String  // "sending", "sent", "delivered", "read"
+    var readBy: [String]  // Array of userIds who have read this message
     
     // Relationship to parent conversation
     var conversation: ConversationEntity?
     
-    init(messageId: String, senderId: String, text: String, timestamp: Date, status: String = "sending", conversation: ConversationEntity? = nil) {
+    init(messageId: String, senderId: String, text: String, timestamp: Date, status: String = "sending", readBy: [String] = [], conversation: ConversationEntity? = nil) {
         self.messageId = messageId
         self.senderId = senderId
         self.text = text
         self.timestamp = timestamp
         self.status = status
+        self.readBy = readBy
         self.conversation = conversation
     }
     
@@ -37,6 +45,7 @@ final class MessageEntity {
             text: message.text,
             timestamp: message.timestamp,
             status: message.status,
+            readBy: message.readBy,
             conversation: conversation
         )
     }
@@ -49,7 +58,8 @@ final class MessageEntity {
             senderId: senderId,
             text: text,
             timestamp: timestamp,
-            status: status
+            status: status,
+            readBy: readBy
         )
     }
 }

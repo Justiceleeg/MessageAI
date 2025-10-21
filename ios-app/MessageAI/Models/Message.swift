@@ -7,7 +7,13 @@
 
 import Foundation
 
-/// Represents a message in a 1:1 conversation
+/// Represents a message in a 1:1 or group conversation
+/// 
+/// Status Values:
+/// - "sending": Message is being sent (optimistic UI, not yet confirmed by Firestore)
+/// - "sent": Message confirmed written to Firestore, but not yet delivered to recipient
+/// - "delivered": Message delivered to recipient (recipient's app received it)
+/// - "read": Message read by recipient (recipient viewed it in ChatView)
 struct Message: Identifiable, Codable, Equatable {
     let id: String  // messageId for Identifiable conformance
     let messageId: String
@@ -15,6 +21,7 @@ struct Message: Identifiable, Codable, Equatable {
     let text: String
     let timestamp: Date
     var status: String  // "sending", "sent", "delivered", "read"
+    var readBy: [String]  // Array of userIds who have read this message
     
     /// Helper to determine if message was sent by current user for UI layout
     func isSentByCurrentUser(currentUserId: String) -> Bool {
@@ -28,15 +35,17 @@ struct Message: Identifiable, Codable, Equatable {
         case text
         case timestamp
         case status
+        case readBy
     }
     
-    init(id: String, messageId: String, senderId: String, text: String, timestamp: Date, status: String = "sending") {
+    init(id: String, messageId: String, senderId: String, text: String, timestamp: Date, status: String = "sending", readBy: [String] = []) {
         self.id = id
         self.messageId = messageId
         self.senderId = senderId
         self.text = text
         self.timestamp = timestamp
         self.status = status
+        self.readBy = readBy
     }
     
     /// Initialize from Firestore decoder
@@ -49,6 +58,7 @@ struct Message: Identifiable, Codable, Equatable {
         self.text = try container.decode(String.self, forKey: .text)
         self.timestamp = try container.decode(Date.self, forKey: .timestamp)
         self.status = try container.decode(String.self, forKey: .status)
+        self.readBy = try container.decodeIfPresent([String].self, forKey: .readBy) ?? []
     }
 }
 

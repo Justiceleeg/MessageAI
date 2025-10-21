@@ -123,6 +123,7 @@ struct ChatView: View {
                                 MessageBubbleView(
                                     message: message,
                                     isSentByCurrentUser: viewModel.isSentByCurrentUser(message: message),
+                                    status: viewModel.computeMessageStatus(for: message),
                                     onRetry: message.status == "failed" ? {
                                         selectedMessageForRetry = message
                                         showRetryActionSheet = true
@@ -131,6 +132,10 @@ struct ChatView: View {
                                     senderName: !viewModel.isSentByCurrentUser(message: message) ? viewModel.getSenderDisplayName(userId: message.senderId) : nil
                                 )
                                 .id(message.id)
+                                .onAppear {
+                                    // Mark message as read when it appears (Story 3.2)
+                                    viewModel.markMessageAsReadIfVisible(messageId: message.id)
+                                }
                             }
                         }
                         .padding(.vertical, 8)

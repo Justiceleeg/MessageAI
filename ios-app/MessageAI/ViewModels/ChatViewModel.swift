@@ -38,6 +38,7 @@ final class ChatViewModel: ObservableObject {
     private var messageListenerTask: Task<Void, Never>?
     private var networkObserverTask: Task<Void, Never>?
     
+<<<<<<< HEAD
     // Group chat properties (for lazy creation)
     var conversation: Conversation? // Made public for View access
     private var pendingGroupParticipants: [User]?
@@ -45,6 +46,12 @@ final class ChatViewModel: ObservableObject {
     var isGroupChat: Bool {
         conversation?.isGroupChat ?? (pendingGroupParticipants != nil)
     }
+=======
+    // Read receipt tracking
+    @Published private var conversation: Conversation?
+    private var readReceiptTask: Task<Void, Never>?
+    private var pendingReadMessageIds: Set<String> = []
+>>>>>>> 4aa91d5 (story 3.2 read receipts)
     
     // Computed property for participants array
     private var participants: [String] {
@@ -100,6 +107,12 @@ final class ChatViewModel: ObservableObject {
             loadCachedMessages()
             // Then start real-time listener
             loadMessages()
+            // Load conversation data for read receipts (Story 3.2)
+            Task {
+                await loadConversationData()
+                // Mark messages as delivered AFTER conversation loads (Story 3.2)
+                await markMessagesAsDeliveredAsync()
+            }
         }
     }
     
@@ -259,6 +272,11 @@ final class ChatViewModel: ObservableObject {
         self.messages = mergedMessages
         
         logger.debug("Merged messages: \(firestoreMessages.count) from Firestore + \(localOptimisticMessages.count) local optimistic = \(mergedMessages.count) total")
+        
+        // Mark any new undelivered messages as delivered (Story 3.2)
+        Task {
+            await markMessagesAsDeliveredAsync()
+        }
     }
     
     /// Save messages to SwiftData cache (on main actor)
@@ -858,6 +876,188 @@ final class ChatViewModel: ObservableObject {
         }
         
         return false
+    }
+    
+    // MARK: - Read Receipt Methods (Story 3.2)
+    
+    /// Compute message display status based on readBy and conversation participants
+    func computeMessageStatus(for message: Message) -> String {
+        // Only show status for messages sent by current user
+        guard let currentUserId = authService.currentUser?.userId,
+              message.senderId == currentUserId else {
+            return ""  // Received messages don't show status
+        }
+        
+        logger.debug("Computing status for message \(message.messageId): rawStatus=\(message.status), readBy=\(message.readBy)")
+        
+        // Return status directly for sending/sent/delivered
+        if message.status == "sending" {
+            return "sending"
+        }
+        
+        if message.status == "sent" {
+            return "sent"
+        }
+        
+        if message.status == "delivered" {
+            return "delivered"
+        }
+        
+        // For read status, check readBy against participants
+        if message.status == "read" {
+            guard let conversation = conversation else {
+                logger.debug("No conversation loaded yet for message \(message.messageId)")
+                return "delivered"  // Default to delivered if conversation not loaded
+            }
+            
+            // Get other participants (exclude current user)
+            let otherParticipants = conversation.participants.filter { $0 != currentUserId }
+            
+            logger.debug("Message \(message.messageId): otherParticipants=\(otherParticipants), readBy=\(message.readBy)")
+            
+            // No other participants? Just return status
+            guard !otherParticipants.isEmpty else {
+                return message.status
+            }
+            
+            // Check if all other participants have read the message
+            let allRead = otherParticipants.allSatisfy { message.readBy.contains($0) }
+            
+            logger.debug("Message \(message.messageId): allRead=\(allRead)")
+            
+            // Return "read" if all have read, otherwise return delivered
+            return allRead ? "read" : "delivered"
+        }
+        
+        return message.status
+    }
+    
+    /// Mark messages as delivered when ChatView appears (Story 3.2) - Async version
+    private func markMessagesAsDeliveredAsync() async {
+        guard let conversationId = conversationId,
+              let currentUserId = authService.currentUser?.userId else {
+            logger.warning("Cannot mark delivered - missing conversationId or currentUserId")
+            return
+        }
+        
+        // Find undelivered messages from other users
+        let undeliveredMessages = messages.filter {
+            $0.senderId != currentUserId && $0.status == "sent"
+        }
+        
+        logger.info("Found \(undeliveredMessages.count) undelivered messages (total messages: \(self.messages.count))")
+        
+        guard !undeliveredMessages.isEmpty else {
+            logger.debug("No undelivered messages to mark")
+            return
+        }
+        
+        logger.info("Marking \(undeliveredMessages.count) messages as delivered")
+        
+        // Mark each message as delivered sequentially
+        for message in undeliveredMessages {
+            do {
+                logger.debug("Marking message \(message.messageId) as delivered")
+                try await firestoreService.markMessageAsDelivered(
+                    conversationId: conversationId,
+                    messageId: message.messageId,
+                    userId: currentUserId
+                )
+                logger.debug("Successfully marked message \(message.messageId) as delivered")
+            } catch {
+                logger.error("Failed to mark message as delivered: \(error.localizedDescription)")
+            }
+        }
+        
+        // Small delay to ensure Firestore updates propagate before read receipts
+        try? await Task.sleep(for: .milliseconds(500))
+        logger.info("Delivered status updates complete, read receipts can now fire")
+    }
+    
+    /// Mark a message as read when it becomes visible (Story 3.2)
+    func markMessageAsReadIfVisible(messageId: String) {
+        guard let conversationId = conversationId,
+              let currentUserId = authService.currentUser?.userId else {
+            logger.warning("Cannot mark read - missing conversationId or currentUserId")
+            return
+        }
+        
+        // Find the message
+        guard let message = messages.first(where: { $0.id == messageId }) else {
+            logger.debug("Message \(messageId) not found in messages array")
+            return
+        }
+        
+        // Only mark messages from other users
+        guard message.senderId != currentUserId else {
+            logger.debug("Skipping own message \(messageId)")
+            return
+        }
+        
+        // Only mark if not already read by current user
+        guard !message.readBy.contains(currentUserId) else {
+            logger.debug("Message \(messageId) already read by current user")
+            return
+        }
+        
+        // Skip if message is still in "sending" or "sent" status (wait for delivered first)
+        if message.status == "sending" || message.status == "sent" {
+            logger.debug("Message \(messageId) not yet delivered (status: \(message.status)), skipping read receipt for now")
+            return
+        }
+        
+        logger.debug("Adding message \(messageId) to pending read queue (current status: \(message.status))")
+        
+        // Add to pending set for batching
+        pendingReadMessageIds.insert(messageId)
+        
+        // Cancel existing task
+        readReceiptTask?.cancel()
+        
+        // Schedule batch update after throttle delay (2 seconds for better visibility)
+        readReceiptTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: .seconds(2))
+                
+                guard !pendingReadMessageIds.isEmpty else { return }
+                
+                let messageIdsToMark = Array(pendingReadMessageIds)
+                pendingReadMessageIds.removeAll()
+                
+                logger.info("Batch marking \(messageIdsToMark.count) messages as read")
+                
+                try await firestoreService.batchMarkMessagesAsRead(
+                    conversationId: conversationId,
+                    messageIds: messageIdsToMark,
+                    userId: currentUserId
+                )
+                
+                logger.info("Successfully batch marked \(messageIdsToMark.count) messages as read")
+                
+            } catch is CancellationError {
+                // Task was cancelled, this is expected
+                logger.debug("Read receipt task cancelled")
+            } catch {
+                logger.error("Failed to batch mark messages as read: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    /// Load conversation data for read receipt computation
+    private func loadConversationData() async {
+        guard let conversationId = conversationId else { return }
+        
+        do {
+            let conversation = try await firestoreService.fetchConversation(conversationId: conversationId)
+            
+            await MainActor.run {
+                self.conversation = conversation
+                logger.info("Loaded conversation data with \(conversation.participants.count) participants")
+            }
+            
+        } catch {
+            logger.error("Failed to load conversation data: \(error.localizedDescription)")
+        }
     }
 }
 

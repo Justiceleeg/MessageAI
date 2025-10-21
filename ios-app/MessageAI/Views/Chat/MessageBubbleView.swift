@@ -12,15 +12,17 @@ struct MessageBubbleView: View {
     
     let message: Message
     let isSentByCurrentUser: Bool
+    let status: String  // Computed status from ChatViewModel (Story 3.2)
     let onRetry: (() -> Void)?
     let isGroupChat: Bool
     let senderName: String?
     
     // MARK: - Initialization
     
-    init(message: Message, isSentByCurrentUser: Bool, onRetry: (() -> Void)? = nil, isGroupChat: Bool = false, senderName: String? = nil) {
+    init(message: Message, isSentByCurrentUser: Bool, status: String = "", onRetry: (() -> Void)? = nil, isGroupChat: Bool = false, senderName: String? = nil) {
         self.message = message
         self.isSentByCurrentUser = isSentByCurrentUser
+        self.status = status.isEmpty ? message.status : status
         self.onRetry = onRetry
         self.isGroupChat = isGroupChat
         self.senderName = senderName
@@ -97,10 +99,10 @@ struct MessageBubbleView: View {
         DateFormatters.messageTime.string(from: message.timestamp)
     }
     
-    /// Status indicator view based on message status
+    /// Status indicator view based on message status (Story 3.2 - Read Receipts)
     @ViewBuilder
     private var statusIndicator: some View {
-        switch message.status {
+        switch status {
         case "sending":
             // Gray spinner for sending state
             ProgressView()
@@ -109,11 +111,31 @@ struct MessageBubbleView: View {
                 .accessibilityLabel("Sending message")
             
         case "sent":
-            // Blue checkmark for sent state
+            // Single gray checkmark for sent state
             Image(systemName: "checkmark")
                 .font(.system(size: 10, weight: .medium))
-                .foregroundColor(.blue)
+                .foregroundColor(.gray)
                 .accessibilityLabel("Message sent")
+            
+        case "delivered":
+            // Double gray checkmark for delivered state
+            HStack(spacing: -2) {
+                Image(systemName: "checkmark")
+                Image(systemName: "checkmark")
+            }
+            .font(.system(size: 10, weight: .medium))
+            .foregroundColor(.gray)
+            .accessibilityLabel("Message delivered")
+            
+        case "read":
+            // Double blue checkmark for read state
+            HStack(spacing: -2) {
+                Image(systemName: "checkmark")
+                Image(systemName: "checkmark")
+            }
+            .font(.system(size: 10, weight: .medium))
+            .foregroundColor(.blue)
+            .accessibilityLabel("Message read")
             
         case "failed":
             // Red exclamation mark for failed state
@@ -123,7 +145,7 @@ struct MessageBubbleView: View {
                 .accessibilityLabel("Message failed to send, tap to retry")
             
         default:
-            // No indicator for other states (delivered, read, etc.)
+            // No indicator for empty or unknown states
             EmptyView()
         }
     }
@@ -143,12 +165,16 @@ struct MessageBubbleView: View {
         let sender = isSentByCurrentUser ? "You" : "Other user"
         var label = "\(sender) sent: \(message.text), at \(formattedTimestamp)"
         
-        // Add status to accessibility label
-        switch message.status {
+        // Add status to accessibility label (Story 3.2)
+        switch status {
         case "sending":
             label += ", sending"
         case "sent":
             label += ", sent"
+        case "delivered":
+            label += ", delivered"
+        case "read":
+            label += ", read"
         case "failed":
             label += ", failed to send, tap to retry"
         default:

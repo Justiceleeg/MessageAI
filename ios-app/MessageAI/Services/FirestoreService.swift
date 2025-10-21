@@ -14,9 +14,9 @@ import OSLog
 @MainActor
 class FirestoreService: ObservableObject {
     
-    // MARK: - Private Properties
+    // MARK: - Properties
     
-    private let db = Firestore.firestore()
+    let db = Firestore.firestore()
     private let logger = Logger(subsystem: "com.jpw.message-ai", category: "FirestoreService")
     
     // MARK: - User Profile Methods
@@ -360,13 +360,16 @@ class FirestoreService: ObservableObject {
                             return nil
                         }
                         
+                        let readBy = doc.data()["readBy"] as? [String] ?? []
+                        
                         return Message(
                             id: messageId,
                             messageId: messageId,
                             senderId: senderId,
                             text: text,
                             timestamp: timestamp,
-                            status: status
+                            status: status,
+                            readBy: readBy
                         )
                     }
                     
@@ -417,7 +420,8 @@ class FirestoreService: ObservableObject {
                 "senderId": senderId,
                 "text": text,
                 "timestamp": FieldValue.serverTimestamp(),
-                "status": "sent"
+                "status": "sent",
+                "readBy": []
             ]
             batch.setData(messageData, forDocument: messageRef)
             
@@ -487,7 +491,8 @@ class FirestoreService: ObservableObject {
                 "senderId": senderId,
                 "text": text,
                 "timestamp": FieldValue.serverTimestamp(),
-                "status": "sent"
+                "status": "sent",
+                "readBy": []
             ]
             batch.setData(messageData, forDocument: messageRef)
             
@@ -503,6 +508,7 @@ class FirestoreService: ObservableObject {
         }
     }
     
+<<<<<<< HEAD
     /// Create a new group conversation (Story 3.1)
     /// - Parameters:
     ///   - participants: Array of user IDs (must include 3+ users)
@@ -543,10 +549,36 @@ class FirestoreService: ObservableObject {
             
         } catch {
             logger.error("Failed to create group conversation: \(error.localizedDescription)")
+=======
+    // MARK: - Read Receipt Methods
+    
+    /// Mark a message as delivered (Story 3.2)
+    /// - Parameters:
+    ///   - conversationId: The conversation's unique identifier
+    ///   - messageId: The message's unique identifier
+    ///   - userId: The user ID marking the message as delivered
+    /// - Throws: FirestoreError if the operation fails
+    func markMessageAsDelivered(conversationId: String, messageId: String, userId: String) async throws {
+        logger.info("Marking message as delivered: \(messageId) by user: \(userId)")
+        
+        do {
+            let messageRef = db.collection("conversations")
+                .document(conversationId)
+                .collection("messages")
+                .document(messageId)
+            
+            try await messageRef.updateData(["status": "delivered"])
+            
+            logger.info("Message marked as delivered successfully: \(messageId)")
+            
+        } catch {
+            logger.error("Failed to mark message as delivered: \(error.localizedDescription)")
+>>>>>>> 4aa91d5 (story 3.2 read receipts)
             throw FirestoreError.writeFailed(error.localizedDescription)
         }
     }
     
+<<<<<<< HEAD
     /// Fetch user profile for display name (Story 3.1)
     /// Note: Consider implementing caching in the ViewModel layer to avoid repeated fetches
     /// - Parameter userId: The user ID to fetch
@@ -562,6 +594,80 @@ class FirestoreService: ObservableObject {
     /// - Returns: Conversation model if found
     /// - Throws: FirestoreError if the operation fails
     func getConversation(conversationId: String) async throws -> Conversation {
+=======
+    /// Mark a message as read (Story 3.2)
+    /// - Parameters:
+    ///   - conversationId: The conversation's unique identifier
+    ///   - messageId: The message's unique identifier
+    ///   - userId: The user ID marking the message as read
+    /// - Throws: FirestoreError if the operation fails
+    func markMessageAsRead(conversationId: String, messageId: String, userId: String) async throws {
+        logger.info("Marking message as read: \(messageId) by user: \(userId)")
+        
+        do {
+            let messageRef = db.collection("conversations")
+                .document(conversationId)
+                .collection("messages")
+                .document(messageId)
+            
+            try await messageRef.updateData([
+                "status": "read",
+                "readBy": FieldValue.arrayUnion([userId])
+            ])
+            
+            logger.info("Message marked as read successfully: \(messageId)")
+            
+        } catch {
+            logger.error("Failed to mark message as read: \(error.localizedDescription)")
+            throw FirestoreError.writeFailed(error.localizedDescription)
+        }
+    }
+    
+    /// Batch mark multiple messages as read (Story 3.2)
+    /// - Parameters:
+    ///   - conversationId: The conversation's unique identifier
+    ///   - messageIds: Array of message IDs to mark as read
+    ///   - userId: The user ID marking the messages as read
+    /// - Throws: FirestoreError if the operation fails
+    func batchMarkMessagesAsRead(conversationId: String, messageIds: [String], userId: String) async throws {
+        guard !messageIds.isEmpty else {
+            logger.warning("No message IDs provided for batch mark as read")
+            return
+        }
+        
+        logger.info("Batch marking \(messageIds.count) messages as read for user: \(userId)")
+        
+        do {
+            let batch = db.batch()
+            
+            for messageId in messageIds {
+                let messageRef = db.collection("conversations")
+                    .document(conversationId)
+                    .collection("messages")
+                    .document(messageId)
+                
+                batch.updateData([
+                    "status": "read",
+                    "readBy": FieldValue.arrayUnion([userId])
+                ], forDocument: messageRef)
+            }
+            
+            try await batch.commit()
+            
+            logger.info("Successfully batch marked \(messageIds.count) messages as read")
+            
+        } catch {
+            logger.error("Failed to batch mark messages as read: \(error.localizedDescription)")
+            throw FirestoreError.writeFailed(error.localizedDescription)
+        }
+    }
+    
+    /// Fetch a conversation by ID (Story 3.2)
+    /// - Parameter conversationId: The conversation's unique identifier
+    /// - Returns: Conversation model
+    /// - Throws: FirestoreError if the operation fails
+    func fetchConversation(conversationId: String) async throws -> Conversation {
+>>>>>>> 4aa91d5 (story 3.2 read receipts)
         logger.info("Fetching conversation: \(conversationId)")
         
         do {
