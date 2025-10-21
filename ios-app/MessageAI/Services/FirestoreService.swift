@@ -508,7 +508,8 @@ class FirestoreService: ObservableObject {
         }
     }
     
-<<<<<<< HEAD
+    // MARK: - Group Chat Methods (Story 3.1)
+    
     /// Create a new group conversation (Story 3.1)
     /// - Parameters:
     ///   - participants: Array of user IDs (must include 3+ users)
@@ -549,8 +550,45 @@ class FirestoreService: ObservableObject {
             
         } catch {
             logger.error("Failed to create group conversation: \(error.localizedDescription)")
-=======
-    // MARK: - Read Receipt Methods
+            throw FirestoreError.writeFailed(error.localizedDescription)
+        }
+    }
+    
+    /// Fetch user profile for display name (Story 3.1)
+    /// Note: Consider implementing caching in the ViewModel layer to avoid repeated fetches
+    /// - Parameter userId: The user ID to fetch
+    /// - Returns: User model with profile information
+    /// - Throws: FirestoreError if the operation fails
+    func fetchUserProfile(userId: String) async throws -> User {
+        // Reuse existing getUserProfile method
+        return try await getUserProfile(userId: userId)
+    }
+    
+    /// Fetch a single conversation by ID (Story 3.1)
+    /// - Parameter conversationId: The conversation ID to fetch
+    /// - Returns: Conversation model if found
+    /// - Throws: FirestoreError if the operation fails
+    func getConversation(conversationId: String) async throws -> Conversation {
+        logger.info("Fetching conversation: \(conversationId)")
+        
+        do {
+            let document = try await db.collection("conversations").document(conversationId).getDocument()
+            
+            guard let conversation = Conversation(document: document) else {
+                logger.error("Failed to parse conversation document: \(conversationId)")
+                throw FirestoreError.invalidData
+            }
+            
+            logger.info("Conversation fetched successfully: \(conversationId)")
+            return conversation
+            
+        } catch {
+            logger.error("Failed to fetch conversation: \(error.localizedDescription)")
+            throw FirestoreError.readFailed(error.localizedDescription)
+        }
+    }
+    
+    // MARK: - Read Receipt Methods (Story 3.2)
     
     /// Mark a message as delivered (Story 3.2)
     /// - Parameters:
@@ -573,28 +611,10 @@ class FirestoreService: ObservableObject {
             
         } catch {
             logger.error("Failed to mark message as delivered: \(error.localizedDescription)")
->>>>>>> 4aa91d5 (story 3.2 read receipts)
             throw FirestoreError.writeFailed(error.localizedDescription)
         }
     }
     
-<<<<<<< HEAD
-    /// Fetch user profile for display name (Story 3.1)
-    /// Note: Consider implementing caching in the ViewModel layer to avoid repeated fetches
-    /// - Parameter userId: The user ID to fetch
-    /// - Returns: User model with profile information
-    /// - Throws: FirestoreError if the operation fails
-    func fetchUserProfile(userId: String) async throws -> User {
-        // Reuse existing getUserProfile method
-        return try await getUserProfile(userId: userId)
-    }
-    
-    /// Fetch a single conversation by ID (Story 3.1)
-    /// - Parameter conversationId: The conversation ID to fetch
-    /// - Returns: Conversation model if found
-    /// - Throws: FirestoreError if the operation fails
-    func getConversation(conversationId: String) async throws -> Conversation {
-=======
     /// Mark a message as read (Story 3.2)
     /// - Parameters:
     ///   - conversationId: The conversation's unique identifier
@@ -662,12 +682,11 @@ class FirestoreService: ObservableObject {
         }
     }
     
-    /// Fetch a conversation by ID (Story 3.2)
+    /// Fetch a conversation by ID (Story 3.2) - Alias for getConversation
     /// - Parameter conversationId: The conversation's unique identifier
     /// - Returns: Conversation model
     /// - Throws: FirestoreError if the operation fails
     func fetchConversation(conversationId: String) async throws -> Conversation {
->>>>>>> 4aa91d5 (story 3.2 read receipts)
         logger.info("Fetching conversation: \(conversationId)")
         
         do {

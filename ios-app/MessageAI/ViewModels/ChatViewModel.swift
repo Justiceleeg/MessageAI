@@ -38,20 +38,17 @@ final class ChatViewModel: ObservableObject {
     private var messageListenerTask: Task<Void, Never>?
     private var networkObserverTask: Task<Void, Never>?
     
-<<<<<<< HEAD
-    // Group chat properties (for lazy creation)
-    var conversation: Conversation? // Made public for View access
+    // Group chat properties (Story 3.1)
+    @Published var conversation: Conversation? // Made public for View access and read receipt tracking
     private var pendingGroupParticipants: [User]?
     private var pendingGroupName: String?
     var isGroupChat: Bool {
         conversation?.isGroupChat ?? (pendingGroupParticipants != nil)
     }
-=======
-    // Read receipt tracking
-    @Published private var conversation: Conversation?
+    
+    // Read receipt tracking (Story 3.2)
     private var readReceiptTask: Task<Void, Never>?
     private var pendingReadMessageIds: Set<String> = []
->>>>>>> 4aa91d5 (story 3.2 read receipts)
     
     // Computed property for participants array
     private var participants: [String] {
