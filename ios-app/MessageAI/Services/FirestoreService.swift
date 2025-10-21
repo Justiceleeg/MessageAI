@@ -387,10 +387,10 @@ class FirestoreService: ObservableObject {
     ///   - text: Message text content
     /// - Returns: The created Message
     /// - Throws: FirestoreError if the operation fails
-    open func sendMessage(conversationId: String, senderId: String, text: String) async throws -> Message {
+    open func sendMessage(conversationId: String, senderId: String, text: String, messageId: String? = nil) async throws -> Message {
         logger.info("Sending message to conversationId: \(conversationId)")
         
-        let messageId = UUID().uuidString
+        let messageId = messageId ?? UUID().uuidString
         let timestamp = Date()
         
         let message = Message(
@@ -448,11 +448,11 @@ class FirestoreService: ObservableObject {
     ///   - text: First message text content
     /// - Returns: Tuple containing the created conversation ID and message
     /// - Throws: FirestoreError if the operation fails
-    open func createConversationWithMessage(participants: [String], senderId: String, text: String) async throws -> (conversationId: String, message: Message) {
+    open func createConversationWithMessage(participants: [String], senderId: String, text: String, messageId: String? = nil) async throws -> (conversationId: String, message: Message) {
         logger.info("Creating new conversation with first message from senderId: \(senderId)")
         
         let conversationId = UUID().uuidString
-        let messageId = UUID().uuidString
+        let messageId = messageId ?? UUID().uuidString
         let timestamp = Date()
         
         let message = Message(

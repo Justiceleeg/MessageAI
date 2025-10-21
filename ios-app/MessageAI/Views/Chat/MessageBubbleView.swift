@@ -12,6 +12,15 @@ struct MessageBubbleView: View {
     
     let message: Message
     let isSentByCurrentUser: Bool
+    let onRetry: (() -> Void)?
+    
+    // MARK: - Initialization
+    
+    init(message: Message, isSentByCurrentUser: Bool, onRetry: (() -> Void)? = nil) {
+        self.message = message
+        self.isSentByCurrentUser = isSentByCurrentUser
+        self.onRetry = onRetry
+    }
     
     // MARK: - Body
     
@@ -30,7 +39,12 @@ struct MessageBubbleView: View {
                     .padding(.vertical, 8)
                     .background(
                         RoundedRectangle(cornerRadius: 18)
-                            .fill(isSentByCurrentUser ? Color.blue : Color(uiColor: .systemGray5))
+                            .fill(bubbleBackgroundColor)
+                            .overlay(
+                                // Red border for failed messages
+                                RoundedRectangle(cornerRadius: 18)
+                                    .stroke(message.status == "failed" ? Color.red : Color.clear, lineWidth: 1)
+                            )
                     )
                     .fixedSize(horizontal: false, vertical: true)
                 
@@ -39,16 +53,29 @@ struct MessageBubbleView: View {
                 }
             }
             
-            // Timestamp below bubble
-            Text(formattedTimestamp)
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 12)
+            // Timestamp and status indicator
+            HStack(spacing: 4) {
+                Text(formattedTimestamp)
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                
+                // Status indicator (only for sent messages)
+                if isSentByCurrentUser {
+                    statusIndicator
+                }
+            }
+            .padding(.horizontal, 12)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 2)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityLabel)
+        .onTapGesture {
+            // Only tappable if failed and onRetry is provided
+            if message.status == "failed", let onRetry = onRetry {
+                onRetry()
+            }
+        }
     }
     
     // MARK: - Computed Properties
@@ -58,10 +85,65 @@ struct MessageBubbleView: View {
         DateFormatters.messageTime.string(from: message.timestamp)
     }
     
+    /// Status indicator view based on message status
+    @ViewBuilder
+    private var statusIndicator: some View {
+        switch message.status {
+        case "sending":
+            // Gray spinner for sending state
+            ProgressView()
+                .controlSize(.mini)
+                .tint(.gray)
+                .accessibilityLabel("Sending message")
+            
+        case "sent":
+            // Blue checkmark for sent state
+            Image(systemName: "checkmark")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(.blue)
+                .accessibilityLabel("Message sent")
+            
+        case "failed":
+            // Red exclamation mark for failed state
+            Image(systemName: "exclamationmark.circle.fill")
+                .font(.system(size: 12))
+                .foregroundColor(.red)
+                .accessibilityLabel("Message failed to send, tap to retry")
+            
+        default:
+            // No indicator for other states (delivered, read, etc.)
+            EmptyView()
+        }
+    }
+    
+    /// Background color for message bubble
+    private var bubbleBackgroundColor: Color {
+        if isSentByCurrentUser {
+            // Slightly dimmed blue for failed messages
+            return message.status == "failed" ? Color.blue.opacity(0.7) : Color.blue
+        } else {
+            return Color(uiColor: .systemGray5)
+        }
+    }
+    
     /// VoiceOver accessibility label
     private var accessibilityLabel: String {
         let sender = isSentByCurrentUser ? "You" : "Other user"
-        return "\(sender) sent: \(message.text), at \(formattedTimestamp)"
+        var label = "\(sender) sent: \(message.text), at \(formattedTimestamp)"
+        
+        // Add status to accessibility label
+        switch message.status {
+        case "sending":
+            label += ", sending"
+        case "sent":
+            label += ", sent"
+        case "failed":
+            label += ", failed to send, tap to retry"
+        default:
+            break
+        }
+        
+        return label
     }
 }
 
@@ -81,11 +163,42 @@ struct MessageBubbleView: View {
     )
 }
 
-#Preview("Received Message") {
+#Preview("Sending Message") {
     MessageBubbleView(
         message: Message(
             id: "2",
             messageId: "2",
+            senderId: "user1",
+            text: "This message is sending...",
+            timestamp: Date(),
+            status: "sending"
+        ),
+        isSentByCurrentUser: true
+    )
+}
+
+#Preview("Failed Message") {
+    MessageBubbleView(
+        message: Message(
+            id: "3",
+            messageId: "3",
+            senderId: "user1",
+            text: "This message failed to send",
+            timestamp: Date(),
+            status: "failed"
+        ),
+        isSentByCurrentUser: true,
+        onRetry: {
+            print("Retry tapped")
+        }
+    )
+}
+
+#Preview("Received Message") {
+    MessageBubbleView(
+        message: Message(
+            id: "4",
+            messageId: "4",
             senderId: "user2",
             text: "I'm doing great, thanks for asking! How about you?",
             timestamp: Date(),
@@ -98,8 +211,8 @@ struct MessageBubbleView: View {
 #Preview("Long Message") {
     MessageBubbleView(
         message: Message(
-            id: "3",
-            messageId: "3",
+            id: "5",
+            messageId: "5",
             senderId: "user1",
             text: "This is a much longer message that should wrap to multiple lines to test how the bubble handles multiline text content properly.",
             timestamp: Date(),

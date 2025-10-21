@@ -22,6 +22,10 @@ struct ChatView: View {
     @StateObject private var viewModel: ChatViewModel
     @Environment(\.dismiss) private var dismiss
     
+    // State for retry action sheet
+    @State private var showRetryActionSheet = false
+    @State private var selectedMessageForRetry: Message?
+    
     // MARK: - Initialization
     
     init(conversationId: String?, otherUserId: String) {
@@ -106,7 +110,11 @@ struct ChatView: View {
                             ForEach(viewModel.messages) { message in
                                 MessageBubbleView(
                                     message: message,
-                                    isSentByCurrentUser: viewModel.isSentByCurrentUser(message: message)
+                                    isSentByCurrentUser: viewModel.isSentByCurrentUser(message: message),
+                                    onRetry: message.status == "failed" ? {
+                                        selectedMessageForRetry = message
+                                        showRetryActionSheet = true
+                                    } : nil
                                 )
                                 .id(message.id)
                             }
@@ -132,6 +140,27 @@ struct ChatView: View {
                     }
                 }
             }
+        }
+        .confirmationDialog(
+            "Message Failed",
+            isPresented: $showRetryActionSheet,
+            presenting: selectedMessageForRetry
+        ) { message in
+            Button("Try Again") {
+                Task {
+                    await viewModel.retryMessage(message)
+                }
+            }
+            
+            Button("Delete Message", role: .destructive) {
+                viewModel.deleteMessage(message)
+            }
+            
+            Button("Cancel", role: .cancel) {
+                // Do nothing
+            }
+        } message: { _ in
+            Text("This message couldn't be sent. What would you like to do?")
         }
     }
     

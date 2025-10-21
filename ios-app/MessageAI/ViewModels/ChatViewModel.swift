@@ -31,8 +31,11 @@ final class ChatViewModel: ObservableObject {
     private let firestoreService: FirestoreService
     private let authService: AuthService
     private let modelContext: ModelContext
+    private let networkMonitor: NetworkMonitor
+    private let offlineQueue: OfflineMessageQueue
     private let logger = Logger(subsystem: "com.jpw.message-ai", category: "ChatViewModel")
     private var messageListenerTask: Task<Void, Never>?
+    private var networkObserverTask: Task<Void, Never>?
     
     // Computed property for participants array
     private var participants: [String] {
@@ -44,14 +47,19 @@ final class ChatViewModel: ObservableObject {
     
     // MARK: - Initialization
     
-    init(conversationId: String?, otherUserId: String, firestoreService: FirestoreService, authService: AuthService, modelContext: ModelContext? = nil) {
+    init(conversationId: String?, otherUserId: String, firestoreService: FirestoreService, authService: AuthService, networkMonitor: NetworkMonitor, offlineQueue: OfflineMessageQueue, modelContext: ModelContext? = nil) {
         self.conversationId = conversationId
         self.otherUserId = otherUserId
         self.firestoreService = firestoreService
         self.authService = authService
+        self.networkMonitor = networkMonitor
+        self.offlineQueue = offlineQueue
         
         // Use provided context or get from shared PersistenceController
         self.modelContext = modelContext ?? PersistenceController.shared.modelContainer.mainContext
+        
+        // Observe network changes for offline queue processing
+        startNetworkObserver()
     }
     
     // Convenience initializer with default services
@@ -60,7 +68,9 @@ final class ChatViewModel: ObservableObject {
             conversationId: conversationId,
             otherUserId: otherUserId,
             firestoreService: FirestoreService(),
-            authService: AuthService.shared
+            authService: AuthService.shared,
+            networkMonitor: NetworkMonitor.shared,
+            offlineQueue: OfflineMessageQueue.shared
         )
     }
     
@@ -84,6 +94,35 @@ final class ChatViewModel: ObservableObject {
     func onDisappear() {
         logger.info("ChatView disappeared")
         stopListeningToMessages()
+        stopNetworkObserver()
+    }
+    
+    // MARK: - Network Monitoring
+    
+    /// Start observing network changes to process offline queue
+    private func startNetworkObserver() {
+        logger.info("Starting network observer")
+        
+        networkObserverTask = Task { @MainActor in
+            var previousConnectionState = networkMonitor.isConnected
+            
+            // Monitor isConnected changes
+            for await isConnected in networkMonitor.$isConnected.values {
+                // Only process queue when transitioning from offline to online
+                if !previousConnectionState && isConnected {
+                    logger.info("Network reconnected - processing offline queue")
+                    await processOfflineQueue()
+                }
+                previousConnectionState = isConnected
+            }
+        }
+    }
+    
+    /// Stop observing network changes
+    private func stopNetworkObserver() {
+        logger.info("Stopping network observer")
+        networkObserverTask?.cancel()
+        networkObserverTask = nil
     }
     
     // MARK: - Message Loading
@@ -147,14 +186,15 @@ final class ChatViewModel: ObservableObject {
             do {
                 let messageStream = firestoreService.listenToMessages(conversationId: conversationId)
                 
-                for try await messages in messageStream {
+                for try await firestoreMessages in messageStream {
                     await MainActor.run {
-                        self.messages = messages
+                        // Merge Firestore messages with local optimistic messages
+                        self.mergeMessages(firestoreMessages: firestoreMessages)
                         self.isLoading = false
-                        self.logger.info("Received \(messages.count) messages from Firestore")
+                        self.logger.info("Received \(firestoreMessages.count) messages from Firestore")
                         
                         // Save to SwiftData cache
-                        self.saveMessagesToCache(messages)
+                        self.saveMessagesToCache(firestoreMessages)
                     }
                 }
             } catch {
@@ -165,6 +205,47 @@ final class ChatViewModel: ObservableObject {
                 }
             }
         }
+    }
+    
+    /// Merge Firestore messages with local optimistic messages
+    /// This prevents the listener from overwriting optimistic messages before Firestore confirms them
+    private func mergeMessages(firestoreMessages: [Message]) {
+        // Start with Firestore messages (source of truth)
+        var mergedMessages = firestoreMessages
+        
+        // Get message IDs from Firestore for quick lookup
+        let firestoreMessageIds = Set(firestoreMessages.map { $0.messageId })
+        
+        // Find local optimistic messages that aren't in Firestore yet
+        let localOptimisticMessages = self.messages.filter { localMessage in
+            // Only keep if:
+            // 1. Not in Firestore yet (messageId not found)
+            // 2. Status is still "sending" or "failed" (local only)
+            !firestoreMessageIds.contains(localMessage.messageId) && 
+            (localMessage.status == "sending" || localMessage.status == "failed")
+        }
+        
+        // Add unconfirmed local messages
+        mergedMessages.append(contentsOf: localOptimisticMessages)
+        
+        // Sort by timestamp (chronological order)
+        mergedMessages.sort { $0.timestamp < $1.timestamp }
+        
+        // Deduplicate by messageId (just in case) - keep Firestore version
+        var seenIds = Set<String>()
+        mergedMessages = mergedMessages.filter { message in
+            if seenIds.contains(message.messageId) {
+                logger.debug("Duplicate messageId found during merge, keeping Firestore version: \(message.messageId)")
+                return false // Already have this message
+            }
+            seenIds.insert(message.messageId)
+            return true
+        }
+        
+        // Update the array
+        self.messages = mergedMessages
+        
+        logger.debug("Merged messages: \(firestoreMessages.count) from Firestore + \(localOptimisticMessages.count) local optimistic = \(mergedMessages.count) total")
     }
     
     /// Save messages to SwiftData cache (on main actor)
@@ -220,7 +301,7 @@ final class ChatViewModel: ObservableObject {
     
     // MARK: - Sending Messages
     
-    /// Send a message (handles both new and existing conversations)
+    /// Send a message with optimistic UI (handles both new and existing conversations)
     func sendMessage() async {
         // Validate message text
         let trimmedText = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -236,9 +317,30 @@ final class ChatViewModel: ObservableObject {
             return
         }
         
-        isSending = true
+        // Clear message text immediately for better UX
+        let text = trimmedText
+        messageText = ""
         errorMessage = nil
         
+        // 1. Create optimistic message and add to UI immediately
+        let messageId = UUID().uuidString
+        let optimisticMessage = Message(
+            id: messageId,
+            messageId: messageId,
+            senderId: currentUser.userId,
+            text: text,
+            timestamp: Date(),
+            status: "sending"  // Optimistic status
+        )
+        
+        // Add message to UI immediately (optimistic update)
+        messages.append(optimisticMessage)
+        logger.info("Added optimistic message to UI: \(messageId)")
+        
+        // Save optimistic message to cache immediately
+        await saveOptimisticMessageToCache(optimisticMessage)
+        
+        // 2. Attempt to send to Firestore
         do {
             if let existingConversationId = conversationId {
                 // Existing conversation - send message normally
@@ -246,8 +348,13 @@ final class ChatViewModel: ObservableObject {
                 _ = try await firestoreService.sendMessage(
                     conversationId: existingConversationId,
                     senderId: currentUser.userId,
-                    text: trimmedText
+                    text: text,
+                    messageId: messageId  // Pass our optimistic messageId
                 )
+                
+                // Don't update status manually - let Firestore listener handle it
+                // The mergeMessages() will replace optimistic message when Firestore confirms
+                logger.info("Message sent to Firestore successfully: \(messageId)")
                 
             } else {
                 // New conversation - create conversation with first message
@@ -255,25 +362,117 @@ final class ChatViewModel: ObservableObject {
                 let result = try await firestoreService.createConversationWithMessage(
                     participants: participants,
                     senderId: currentUser.userId,
-                    text: trimmedText
+                    text: text,
+                    messageId: messageId  // Pass our optimistic messageId
                 )
                 
-                // Update conversationId and start listening
+                // Update conversationId
                 conversationId = result.conversationId
                 logger.info("New conversation created: \(result.conversationId)")
                 
                 // Start listening to messages now that conversation exists
+                // The listener will replace the optimistic message with the confirmed one
                 loadMessages()
             }
             
-            // Clear message text after successful send
-            messageText = ""
-            isSending = false
-            
         } catch {
             logger.error("Failed to send message: \(error.localizedDescription)")
-            errorMessage = "Failed to send message. Please try again."
-            isSending = false
+            
+            // Check if it's a network error
+            if isNetworkError(error) {
+                logger.warning("Network error detected - enqueueing message to offline queue")
+                
+                // Add to offline queue (requires conversationId)
+                if let conversationId = conversationId {
+                    let queuedMessage = OfflineMessageQueue.QueuedMessage(
+                        messageId: messageId,
+                        conversationId: conversationId,
+                        senderId: currentUser.userId,
+                        text: text,
+                        timestamp: optimisticMessage.timestamp,
+                        retryCount: 0
+                    )
+                    offlineQueue.enqueue(queuedMessage)
+                    
+                    // Keep status as "sending" - will retry automatically
+                    logger.info("Message queued for retry when network reconnects")
+                } else {
+                    // New conversation case - can't queue without conversationId
+                    updateMessageStatus(messageId: messageId, status: "failed")
+                    errorMessage = "Cannot send message while offline in a new conversation. Please try again when connected."
+                }
+            } else {
+                // Other error (permissions, validation, etc.)
+                updateMessageStatus(messageId: messageId, status: "failed")
+                errorMessage = "Failed to send message. Tap to retry."
+            }
+        }
+    }
+    
+    /// Retry sending a failed message
+    func retryMessage(_ message: Message) async {
+        logger.info("Retrying failed message: \(message.messageId)")
+        
+        guard let currentUser = authService.currentUser else {
+            logger.error("No current user - cannot retry message")
+            return
+        }
+        
+        guard let conversationId = conversationId else {
+            logger.error("No conversationId - cannot retry message")
+            return
+        }
+        
+        // Update status to "sending" to show retry in progress
+        updateMessageStatus(messageId: message.messageId, status: "sending")
+        
+        do {
+            _ = try await firestoreService.sendMessage(
+                conversationId: conversationId,
+                senderId: currentUser.userId,
+                text: message.text,
+                messageId: message.messageId  // Preserve the original messageId
+            )
+            
+            // Success - Firestore listener will update status to "sent"
+            // The merge will replace the local "sending" message with confirmed one
+            logger.info("Message retry successful: \(message.messageId)")
+            
+        } catch {
+            logger.error("Message retry failed: \(error.localizedDescription)")
+            
+            // Check if network error
+            if isNetworkError(error) {
+                // Add to offline queue
+                let queuedMessage = OfflineMessageQueue.QueuedMessage(
+                    messageId: message.messageId,
+                    conversationId: conversationId,
+                    senderId: currentUser.userId,
+                    text: message.text,
+                    timestamp: message.timestamp,
+                    retryCount: 0
+                )
+                offlineQueue.enqueue(queuedMessage)
+                logger.info("Message re-queued for retry")
+            } else {
+                // Update status back to "failed"
+                updateMessageStatus(messageId: message.messageId, status: "failed")
+                errorMessage = "Failed to retry message. Please try again."
+            }
+        }
+    }
+    
+    /// Delete a failed message
+    func deleteMessage(_ message: Message) {
+        logger.info("Deleting failed message: \(message.messageId)")
+        messages.removeAll { $0.messageId == message.messageId }
+        
+        // Remove from offline queue if present
+        offlineQueue.remove(messageId: message.messageId)
+        
+        // Remove from cache
+        Task {
+            await deleteMessageFromCache(messageId: message.messageId)
         }
     }
     
@@ -305,6 +504,154 @@ final class ChatViewModel: ObservableObject {
             return false
         }
         return message.isSentByCurrentUser(currentUserId: currentUserId)
+    }
+    
+    /// Update message status in the messages array
+    private func updateMessageStatus(messageId: String, status: String) {
+        if let index = messages.firstIndex(where: { $0.messageId == messageId }) {
+            messages[index].status = status
+            logger.debug("Updated message \(messageId) status to \(status)")
+            
+            // Update in cache as well
+            Task {
+                await updateMessageStatusInCache(messageId: messageId, status: status)
+            }
+        }
+    }
+    
+    /// Save optimistic message to SwiftData cache immediately
+    private func saveOptimisticMessageToCache(_ message: Message) async {
+        guard let conversationId = conversationId else {
+            logger.warning("No conversationId - cannot save optimistic message to cache")
+            return
+        }
+        
+        do {
+            // Fetch conversation entity
+            let conversationPredicate = #Predicate<ConversationEntity> { conv in
+                conv.conversationId == conversationId
+            }
+            let conversationDescriptor = FetchDescriptor<ConversationEntity>(predicate: conversationPredicate)
+            let conversations = try modelContext.fetch(conversationDescriptor)
+            
+            guard let conversation = conversations.first else {
+                logger.warning("Conversation not found in cache, cannot save optimistic message")
+                return
+            }
+            
+            // Create message entity
+            let messageEntity = MessageEntity.from(message: message, conversation: conversation)
+            modelContext.insert(messageEntity)
+            
+            // Save context
+            try modelContext.save()
+            logger.debug("Saved optimistic message to cache: \(message.messageId)")
+            
+        } catch {
+            logger.error("Failed to save optimistic message to cache: \(error.localizedDescription)")
+        }
+    }
+    
+    /// Update message status in SwiftData cache
+    private func updateMessageStatusInCache(messageId: String, status: String) async {
+        do {
+            // Fetch message entity
+            let messagePredicate = #Predicate<MessageEntity> { msg in
+                msg.messageId == messageId
+            }
+            let messageDescriptor = FetchDescriptor<MessageEntity>(predicate: messagePredicate)
+            let messages = try modelContext.fetch(messageDescriptor)
+            
+            if let messageEntity = messages.first {
+                messageEntity.status = status
+                try modelContext.save()
+                logger.debug("Updated message status in cache: \(messageId) -> \(status)")
+            }
+            
+        } catch {
+            logger.error("Failed to update message status in cache: \(error.localizedDescription)")
+        }
+    }
+    
+    /// Delete message from SwiftData cache
+    private func deleteMessageFromCache(messageId: String) async {
+        do {
+            // Fetch message entity
+            let messagePredicate = #Predicate<MessageEntity> { msg in
+                msg.messageId == messageId
+            }
+            let messageDescriptor = FetchDescriptor<MessageEntity>(predicate: messagePredicate)
+            let messages = try modelContext.fetch(messageDescriptor)
+            
+            if let messageEntity = messages.first {
+                modelContext.delete(messageEntity)
+                try modelContext.save()
+                logger.debug("Deleted message from cache: \(messageId)")
+            }
+            
+        } catch {
+            logger.error("Failed to delete message from cache: \(error.localizedDescription)")
+        }
+    }
+    
+    /// Process offline message queue (called when network reconnects)
+    private func processOfflineQueue() async {
+        guard !self.offlineQueue.isEmpty else {
+            logger.info("Offline queue is empty, nothing to process")
+            return
+        }
+        
+        logger.info("Processing offline queue with \(self.offlineQueue.count) messages")
+        
+        let sentCount = await self.offlineQueue.processQueue { [weak self] queuedMessage in
+            guard let self = self else { return }
+            
+            // Attempt to send the queued message with its original messageId
+            _ = try await self.firestoreService.sendMessage(
+                conversationId: queuedMessage.conversationId,
+                senderId: queuedMessage.senderId,
+                text: queuedMessage.text,
+                messageId: queuedMessage.messageId  // Preserve original messageId
+            )
+            
+            // Don't manually update status - Firestore listener will handle it
+            // The merge will replace the optimistic message when confirmed
+        }
+        
+        logger.info("Offline queue processing complete. Sent: \(sentCount) messages")
+        
+        // Update any messages that reached retry limit to "failed"
+        for message in messages where message.status == "sending" {
+            if self.offlineQueue.hasReachedRetryLimit(messageId: message.messageId) {
+                updateMessageStatus(messageId: message.messageId, status: "failed")
+                logger.warning("Message \(message.messageId) reached retry limit, marked as failed")
+            }
+        }
+    }
+    
+    /// Check if error is a network-related error
+    private func isNetworkError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        
+        // Check for NSURLError domain (network errors)
+        if nsError.domain == NSURLErrorDomain {
+            return [
+                NSURLErrorNotConnectedToInternet,
+                NSURLErrorNetworkConnectionLost,
+                NSURLErrorTimedOut,
+                NSURLErrorCannotFindHost,
+                NSURLErrorCannotConnectToHost,
+                NSURLErrorDNSLookupFailed
+            ].contains(nsError.code)
+        }
+        
+        // Check for Firestore-specific network errors
+        if nsError.domain == "FIRFirestoreErrorDomain" {
+            // Firestore error codes: 14 = unavailable, 4 = deadline exceeded
+            return [14, 4].contains(nsError.code)
+        }
+        
+        return false
     }
 }
 

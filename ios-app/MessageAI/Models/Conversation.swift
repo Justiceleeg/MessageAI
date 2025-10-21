@@ -105,7 +105,11 @@ struct Conversation: Identifiable, Codable {
 
 extension Conversation: Hashable {
     static func == (lhs: Conversation, rhs: Conversation) -> Bool {
-        lhs.conversationId == rhs.conversationId
+        lhs.conversationId == rhs.conversationId &&
+        lhs.lastMessageText == rhs.lastMessageText &&
+        lhs.lastMessageTimestamp == rhs.lastMessageTimestamp &&
+        lhs.participants == rhs.participants &&
+        lhs.isGroupChat == rhs.isGroupChat
     }
     
     func hash(into hasher: inout Hasher) {
