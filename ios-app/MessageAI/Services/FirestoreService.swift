@@ -12,7 +12,7 @@ import OSLog
 
 /// Service responsible for Firestore database operations
 @MainActor
-final class FirestoreService: ObservableObject {
+class FirestoreService: ObservableObject {
     
     // MARK: - Private Properties
     
@@ -133,6 +133,85 @@ final class FirestoreService: ObservableObject {
             throw FirestoreError.writeFailed(error.localizedDescription)
         }
     }
+    
+    // MARK: - Conversation Methods
+    
+    /// Listen to conversations for a specific user with real-time updates
+    /// - Parameter userId: The user's unique identifier
+    /// - Returns: AsyncThrowingStream that emits conversation arrays as they update
+    open func listenToConversations(userId: String) -> AsyncThrowingStream<[Conversation], Error> {
+        logger.info("Starting to listen to conversations for userId: \(userId)")
+        
+        return AsyncThrowingStream { continuation in
+            let listener = db.collection("conversations")
+                .whereField("participants", arrayContains: userId)
+                .order(by: "lastMessageTimestamp", descending: true)
+                .addSnapshotListener { [weak self] snapshot, error in
+                    guard let self = self else {
+                        continuation.finish()
+                        return
+                    }
+                    
+                    if let error = error {
+                        self.logger.error("Failed to listen to conversations: \(error.localizedDescription)")
+                        continuation.finish(throwing: FirestoreError.readFailed(error.localizedDescription))
+                        return
+                    }
+                    
+                    guard let documents = snapshot?.documents else {
+                        self.logger.warning("No conversation documents found")
+                        continuation.yield([])
+                        return
+                    }
+                    
+                    let conversations = documents.compactMap { doc -> Conversation? in
+                        guard let conversation = Conversation(document: doc) else {
+                            self.logger.warning("Failed to parse conversation document: \(doc.documentID)")
+                            return nil
+                        }
+                        return conversation
+                    }
+                    
+                    self.logger.info("Fetched \(conversations.count) conversations for userId: \(userId)")
+                    continuation.yield(conversations)
+                }
+            
+            continuation.onTermination = { @Sendable _ in
+                listener.remove()
+            }
+        }
+    }
+    
+    /// Fetch a user by their user ID
+    /// - Parameter userId: The user's unique identifier
+    /// - Returns: User model
+    /// - Throws: FirestoreError if user not found or fetch fails
+    open func fetchUser(userId: String) async throws -> User {
+        logger.info("Fetching user for userId: \(userId)")
+        
+        do {
+            let document = try await db.collection("users").document(userId).getDocument()
+            
+            guard document.exists else {
+                logger.error("User not found: \(userId)")
+                throw FirestoreError.userNotFound
+            }
+            
+            guard let user = User(document: document) else {
+                logger.error("Failed to parse user document for userId: \(userId)")
+                throw FirestoreError.invalidData
+            }
+            
+            logger.info("User fetched successfully for userId: \(userId)")
+            return user
+            
+        } catch let error as FirestoreError {
+            throw error
+        } catch {
+            logger.error("Failed to fetch user: \(error.localizedDescription)")
+            throw FirestoreError.readFailed(error.localizedDescription)
+        }
+    }
 }
 
 // MARK: - FirestoreError
@@ -143,6 +222,7 @@ enum FirestoreError: LocalizedError {
     case readFailed(String)
     case invalidData
     case documentNotFound
+    case userNotFound
     case unknown(String)
     
     var errorDescription: String? {
@@ -155,6 +235,8 @@ enum FirestoreError: LocalizedError {
             return "Invalid data format received from database."
         case .documentNotFound:
             return "The requested document was not found."
+        case .userNotFound:
+            return "User information unavailable."
         case .unknown(let message):
             return "An unexpected error occurred: \(message)"
         }

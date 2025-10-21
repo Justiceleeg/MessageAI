@@ -51,7 +51,10 @@ struct RootView: View {
     var body: some View {
         Group {
             if authViewModel.isAuthenticated {
-                ConversationListView()
+                ConversationListView(
+                    firestoreService: authViewModel.firestoreService,
+                    authService: authViewModel.authService
+                )
             } else {
                 LoginView()
             }

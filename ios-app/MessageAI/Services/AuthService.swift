@@ -12,7 +12,7 @@ import OSLog
 
 /// Service responsible for Firebase Authentication operations
 @MainActor
-final class AuthService: ObservableObject {
+class AuthService: ObservableObject {
     
     // MARK: - Published Properties
     

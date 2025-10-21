@@ -22,8 +22,8 @@ final class AuthViewModel: ObservableObject {
     
     // MARK: - Private Properties
     
-    private let authService: AuthService
-    private let firestoreService: FirestoreService
+    let authService: AuthService
+    let firestoreService: FirestoreService
     private let logger = Logger(subsystem: "com.jpw.message-ai", category: "AuthViewModel")
     
     // MARK: - Initialization
