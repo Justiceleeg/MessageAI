@@ -212,6 +212,189 @@ class FirestoreService: ObservableObject {
             throw FirestoreError.readFailed(error.localizedDescription)
         }
     }
+    
+    // MARK: - Message Methods
+    
+    /// Listen to messages in a conversation with real-time updates
+    /// - Parameter conversationId: The conversation's unique identifier
+    /// - Returns: AsyncThrowingStream that emits message arrays as they update (ordered chronologically)
+    open func listenToMessages(conversationId: String) -> AsyncThrowingStream<[Message], Error> {
+        logger.info("Starting to listen to messages for conversationId: \(conversationId)")
+        
+        return AsyncThrowingStream { continuation in
+            let listener = db.collection("conversations")
+                .document(conversationId)
+                .collection("messages")
+                .order(by: "timestamp", descending: false)  // Oldest first (chronological)
+                .addSnapshotListener { [weak self] snapshot, error in
+                    guard let self = self else {
+                        continuation.finish()
+                        return
+                    }
+                    
+                    if let error = error {
+                        self.logger.error("Failed to listen to messages: \(error.localizedDescription)")
+                        continuation.finish(throwing: FirestoreError.readFailed(error.localizedDescription))
+                        return
+                    }
+                    
+                    guard let documents = snapshot?.documents else {
+                        self.logger.warning("No message documents found for conversationId: \(conversationId)")
+                        continuation.yield([])
+                        return
+                    }
+                    
+                    let messages = documents.compactMap { doc -> Message? in
+                        guard let messageId = doc.data()["messageId"] as? String,
+                              let senderId = doc.data()["senderId"] as? String,
+                              let text = doc.data()["text"] as? String,
+                              let timestamp = (doc.data()["timestamp"] as? Timestamp)?.dateValue(),
+                              let status = doc.data()["status"] as? String else {
+                            self.logger.warning("Failed to parse message document: \(doc.documentID)")
+                            return nil
+                        }
+                        
+                        return Message(
+                            id: messageId,
+                            messageId: messageId,
+                            senderId: senderId,
+                            text: text,
+                            timestamp: timestamp,
+                            status: status
+                        )
+                    }
+                    
+                    self.logger.info("Fetched \(messages.count) messages for conversationId: \(conversationId)")
+                    continuation.yield(messages)
+                }
+            
+            continuation.onTermination = { @Sendable _ in
+                listener.remove()
+            }
+        }
+    }
+    
+    /// Send a message in an existing conversation
+    /// - Parameters:
+    ///   - conversationId: The conversation's unique identifier
+    ///   - senderId: The sender's user ID
+    ///   - text: Message text content
+    /// - Returns: The created Message
+    /// - Throws: FirestoreError if the operation fails
+    open func sendMessage(conversationId: String, senderId: String, text: String) async throws -> Message {
+        logger.info("Sending message to conversationId: \(conversationId)")
+        
+        let messageId = UUID().uuidString
+        let timestamp = Date()
+        
+        let message = Message(
+            id: messageId,
+            messageId: messageId,
+            senderId: senderId,
+            text: text,
+            timestamp: timestamp,
+            status: "sent"
+        )
+        
+        do {
+            // Use batch write for atomicity
+            let batch = db.batch()
+            
+            // Write message to sub-collection
+            let messageRef = db.collection("conversations")
+                .document(conversationId)
+                .collection("messages")
+                .document(messageId)
+            
+            let messageData: [String: Any] = [
+                "messageId": messageId,
+                "senderId": senderId,
+                "text": text,
+                "timestamp": FieldValue.serverTimestamp(),
+                "status": "sent"
+            ]
+            batch.setData(messageData, forDocument: messageRef)
+            
+            // Update parent conversation document
+            let conversationRef = db.collection("conversations").document(conversationId)
+            let conversationData: [String: Any] = [
+                "lastMessageText": text,
+                "lastMessageTimestamp": FieldValue.serverTimestamp()
+            ]
+            batch.updateData(conversationData, forDocument: conversationRef)
+            
+            // Commit batch
+            try await batch.commit()
+            
+            logger.info("Message sent successfully: \(messageId)")
+            return message
+            
+        } catch {
+            logger.error("Failed to send message: \(error.localizedDescription)")
+            throw FirestoreError.writeFailed(error.localizedDescription)
+        }
+    }
+    
+    /// Create a new conversation with the first message atomically (Story 2.0 - Lazy Creation)
+    /// - Parameters:
+    ///   - participants: Array of user IDs (should be [currentUserId, otherUserId])
+    ///   - senderId: The sender's user ID
+    ///   - text: First message text content
+    /// - Returns: Tuple containing the created conversation ID and message
+    /// - Throws: FirestoreError if the operation fails
+    open func createConversationWithMessage(participants: [String], senderId: String, text: String) async throws -> (conversationId: String, message: Message) {
+        logger.info("Creating new conversation with first message from senderId: \(senderId)")
+        
+        let conversationId = UUID().uuidString
+        let messageId = UUID().uuidString
+        let timestamp = Date()
+        
+        let message = Message(
+            id: messageId,
+            messageId: messageId,
+            senderId: senderId,
+            text: text,
+            timestamp: timestamp,
+            status: "sent"
+        )
+        
+        do {
+            // Use batch write for atomicity (conversation + first message created together)
+            let batch = db.batch()
+            
+            // Create conversation document
+            let conversationRef = db.collection("conversations").document(conversationId)
+            let conversationData: [String: Any] = [
+                "conversationId": conversationId,
+                "participants": participants,
+                "lastMessageText": text,
+                "lastMessageTimestamp": FieldValue.serverTimestamp(),
+                "createdAt": FieldValue.serverTimestamp()
+            ]
+            batch.setData(conversationData, forDocument: conversationRef)
+            
+            // Create first message in sub-collection
+            let messageRef = conversationRef.collection("messages").document(messageId)
+            let messageData: [String: Any] = [
+                "messageId": messageId,
+                "senderId": senderId,
+                "text": text,
+                "timestamp": FieldValue.serverTimestamp(),
+                "status": "sent"
+            ]
+            batch.setData(messageData, forDocument: messageRef)
+            
+            // Commit batch
+            try await batch.commit()
+            
+            logger.info("Conversation and first message created successfully: \(conversationId)")
+            return (conversationId, message)
+            
+        } catch {
+            logger.error("Failed to create conversation with message: \(error.localizedDescription)")
+            throw FirestoreError.writeFailed(error.localizedDescription)
+        }
+    }
 }
 
 // MARK: - FirestoreError

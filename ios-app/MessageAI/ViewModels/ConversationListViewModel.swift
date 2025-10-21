@@ -92,9 +92,19 @@ final class ConversationListViewModel: ObservableObject {
         return "Loading..."
     }
     
+    /// Get the other participant's ID in a 1:1 conversation
+    func getOtherParticipantId(for conversation: Conversation) -> String {
+        guard let currentUserId = authService.currentUser?.userId,
+              let otherUserId = conversation.otherParticipantId(currentUserId: currentUserId) else {
+            return ""
+        }
+        
+        return otherUserId
+    }
+    
     /// Get the other participant's display name in a 1:1 conversation
     func getOtherParticipantName(for conversation: Conversation) -> String {
-        guard let currentUserId = authService.currentUser?.uid,
+        guard let currentUserId = authService.currentUser?.userId,
               let otherUserId = conversation.otherParticipantId(currentUserId: currentUserId) else {
             return "Unknown"
         }
@@ -152,7 +162,7 @@ final class ConversationListViewModel: ObservableObject {
         
         listenerTask = Task {
             do {
-                let stream = firestoreService.listenToConversations(userId: currentUser.uid)
+                let stream = firestoreService.listenToConversations(userId: currentUser.userId)
                 
                 for try await conversations in stream {
                     // Update UI with new conversations
@@ -190,7 +200,7 @@ final class ConversationListViewModel: ObservableObject {
             let existingEntities = try modelContext.fetch(descriptor)
             
             // Create lookup dictionary
-            var existingDict = Dictionary(uniqueKeysWithValues: existingEntities.map { ($0.conversationId, $0) })
+            let existingDict = Dictionary(uniqueKeysWithValues: existingEntities.map { ($0.conversationId, $0) })
             
             // Update or insert conversations
             for conversation in conversations {
@@ -212,7 +222,7 @@ final class ConversationListViewModel: ObservableObject {
     
     /// Prefetch user details for all conversation participants
     private func prefetchUserDetails(from conversations: [Conversation]) async {
-        guard let currentUserId = authService.currentUser?.uid else { return }
+        guard let currentUserId = authService.currentUser?.userId else { return }
         
         // Collect all unique participant IDs (excluding current user)
         var participantIds = Set<String>()

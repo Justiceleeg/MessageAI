@@ -64,7 +64,7 @@ final class PersistenceController {
             userId: "preview-user-1",
             displayName: "Preview User",
             email: "preview@example.com",
-            presence: "online",
+            presence: PresenceStatus.online.rawValue,
             lastSeen: Date()
         )
 

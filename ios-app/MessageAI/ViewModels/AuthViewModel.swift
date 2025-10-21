@@ -37,7 +37,9 @@ final class AuthViewModel: ObservableObject {
     }
     
     convenience init() {
-        self.init(authService: AuthService(), firestoreService: FirestoreService())
+        let firestoreService = FirestoreService()
+        let authService = AuthService(firestoreService: firestoreService)
+        self.init(authService: authService, firestoreService: firestoreService)
     }
     
     // MARK: - Sign Up Methods
@@ -59,19 +61,15 @@ final class AuthViewModel: ObservableObject {
         }
         
         do {
-            // Step 1: Create Firebase Auth user
-            let firebaseUser = try await authService.signUp(email: email, password: password)
-            logger.info("Firebase Auth user created: \(firebaseUser.uid)")
-            
-            // Step 2: Create Firestore user profile
-            try await firestoreService.createUserProfile(
-                userId: firebaseUser.uid,
-                displayName: displayName,
-                email: email
+            // AuthService now handles both Firebase Auth and Firestore profile creation
+            let user = try await authService.signUp(
+                email: email,
+                password: password,
+                displayName: displayName
             )
-            logger.info("Firestore user profile created for: \(firebaseUser.uid)")
+            logger.info("User created successfully: \(user.userId)")
             
-            // Step 3: Update authentication state
+            // Update authentication state
             isAuthenticated = true
             logger.info("Sign-up completed successfully")
             
@@ -135,11 +133,11 @@ final class AuthViewModel: ObservableObject {
     // MARK: - Sign Out Methods
     
     /// Signs out the current user
-    func signOut() {
+    func signOut() async {
         logger.info("Signing out user")
         
         do {
-            try authService.signOut()
+            try await authService.signOut()
             isAuthenticated = false
             logger.info("Sign-out completed successfully")
             

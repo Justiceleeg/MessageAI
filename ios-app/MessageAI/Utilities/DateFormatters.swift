@@ -14,6 +14,15 @@ final class DateFormatters {
     
     static let shared = DateFormatters()
     
+    // MARK: - Static Formatters
+    
+    /// Formatter for message bubble timestamps (e.g., "10:30 AM")
+    static let messageTime: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "h:mm a"
+        return formatter
+    }()
+    
     // MARK: - Private Properties
     
     private let calendar = Calendar.current

@@ -29,9 +29,9 @@ final class ConversationEntity {
     /// Indicates if this is a group chat
     var isGroupChat: Bool
     
-    // Note: Relationship to messages will be added in Story 2.2
-    // @Relationship(deleteRule: .cascade, inverse: \MessageEntity.conversation)
-    // var messages: [MessageEntity]?
+    /// Relationship to messages in this conversation
+    @Relationship(deleteRule: .cascade, inverse: \MessageEntity.conversation)
+    var messages: [MessageEntity]?
     
     // MARK: - Initialization
     
@@ -73,25 +73,6 @@ final class ConversationEntity {
         self.lastMessageText = conversation.lastMessageText
         self.lastMessageTimestamp = conversation.lastMessageTimestamp
         self.isGroupChat = conversation.isGroupChat
-    }
-}
-
-/// Placeholder for MessageEntity (will be implemented in Story 2.2)
-@Model
-final class MessageEntity {
-    @Attribute(.unique) var messageId: String
-    var text: String
-    var timestamp: Date
-    var senderId: String
-    
-    // Note: Relationship to conversation will be added in Story 2.2
-    // var conversation: ConversationEntity?
-    
-    init(messageId: String, text: String, timestamp: Date, senderId: String) {
-        self.messageId = messageId
-        self.text = text
-        self.timestamp = timestamp
-        self.senderId = senderId
     }
 }
 

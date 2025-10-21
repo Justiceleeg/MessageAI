@@ -126,7 +126,7 @@ struct ConversationListView: View {
                 ConversationRow(
                     conversation: conversation,
                     displayName: viewModel.getOtherParticipantName(for: conversation),
-                    currentUserId: authViewModel.authService.currentUser?.uid ?? ""
+                    currentUserId: authViewModel.authService.currentUser?.userId ?? ""
                 )
             }
             .listRowSeparator(.visible)
@@ -138,9 +138,10 @@ struct ConversationListView: View {
     
     /// Generate chat destination for navigation
     private func chatDestination(for conversation: Conversation) -> some View {
-        ChatView(
+        let otherUserId = viewModel.getOtherParticipantId(for: conversation)
+        return ChatView(
             conversationId: conversation.conversationId,
-            otherParticipantName: viewModel.getOtherParticipantName(for: conversation)
+            otherUserId: otherUserId
         )
     }
     
@@ -238,10 +239,10 @@ struct ConversationRow: View {
 // MARK: - Preview
 
 #Preview {
-    let authService = AuthService()
+    let authService = AuthService(firestoreService: FirestoreService())
     let firestoreService = FirestoreService()
     
-    return ConversationListView(
+    ConversationListView(
         firestoreService: firestoreService,
         authService: authService
     )

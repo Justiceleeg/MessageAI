@@ -88,8 +88,10 @@ struct SettingsView: View {
     // MARK: - Actions
     
     private func handleLogout() {
-        authViewModel.signOut()
-        dismiss()
+        Task {
+            await authViewModel.signOut()
+            dismiss()
+        }
     }
     
     // MARK: - Helper Methods

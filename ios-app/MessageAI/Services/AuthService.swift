@@ -14,22 +14,59 @@ import OSLog
 @MainActor
 class AuthService: ObservableObject {
     
+    // MARK: - Singleton
+    
+    static let shared = AuthService()
+    
     // MARK: - Published Properties
     
-    @Published var currentUser: FirebaseAuth.User?
+    @Published var currentUser: User?
+    @Published var isAuthenticated: Bool = false
     
     // MARK: - Private Properties
     
     private let logger = Logger(subsystem: "com.jpw.message-ai", category: "AuthService")
+    private var firestoreService: FirestoreService?
     
     // MARK: - Initialization
     
-    init() {
-        // Check if user is already signed in
+    private init() {
+        // Initialize without FirestoreService to avoid concurrency issues with singleton
+        // FirestoreService will be lazily initialized when needed
+        
+        // Check if user is already signed in and load their data
         if let firebaseUser = Auth.auth().currentUser {
-            self.currentUser = firebaseUser
-            logger.info("User already signed in: \(firebaseUser.uid)")
+            logger.info("Firebase user already signed in: \(firebaseUser.uid)")
+            
+            // Load full user data from Firestore
+            Task { @MainActor in
+                do {
+                    let user = try await self.getFirestoreService().getUserProfile(userId: firebaseUser.uid)
+                    self.currentUser = user
+                    self.isAuthenticated = true
+                    self.logger.info("User data loaded: \(user.displayName)")
+                } catch {
+                    self.logger.error("Failed to load user data on init: \(error.localizedDescription)")
+                    // Firebase user exists but Firestore data doesn't - sign out
+                    try? Auth.auth().signOut()
+                }
+            }
         }
+    }
+    
+    // Convenience initializer for testing with dependency injection
+    init(firestoreService: FirestoreService) {
+        self.firestoreService = firestoreService
+    }
+    
+    // MARK: - Private Helper
+    
+    /// Get or create FirestoreService instance
+    private func getFirestoreService() -> FirestoreService {
+        if firestoreService == nil {
+            firestoreService = FirestoreService()
+        }
+        return firestoreService!
     }
     
     // MARK: - Public Methods
@@ -38,17 +75,34 @@ class AuthService: ObservableObject {
     /// - Parameters:
     ///   - email: User's email address
     ///   - password: User's password
-    /// - Returns: Firebase User object
+    ///   - displayName: User's display name
+    /// - Returns: Custom User object
     /// - Throws: AuthError with user-friendly message
-    func signUp(email: String, password: String) async throws -> FirebaseAuth.User {
+    func signUp(email: String, password: String, displayName: String) async throws -> User {
         logger.info("Attempting sign up for email: \(email)")
         
         do {
+            // 1. Create Firebase Auth user
             let authResult = try await Auth.auth().createUser(withEmail: email, password: password)
-            self.currentUser = authResult.user
+            logger.info("Firebase auth successful for user: \(authResult.user.uid)")
             
-            logger.info("Sign up successful for user: \(authResult.user.uid)")
-            return authResult.user
+            // 2. Create Firestore user profile
+            try await getFirestoreService().createUserProfile(
+                userId: authResult.user.uid,
+                displayName: displayName,
+                email: email
+            )
+            logger.info("Firestore profile created for user: \(authResult.user.uid)")
+            
+            // 3. Fetch the created user profile
+            let user = try await getFirestoreService().getUserProfile(userId: authResult.user.uid)
+            
+            // 4. Set current user
+            self.currentUser = user
+            self.isAuthenticated = true
+            
+            logger.info("Sign up complete for user: \(user.displayName)")
+            return user
             
         } catch let error as NSError {
             logger.error("Sign up failed: \(error.localizedDescription)")
@@ -65,10 +119,24 @@ class AuthService: ObservableObject {
         logger.info("Attempting sign in for email: \(email)")
         
         do {
+            // 1. Authenticate with Firebase
             let authResult = try await Auth.auth().signIn(withEmail: email, password: password)
-            self.currentUser = authResult.user
+            logger.info("Firebase auth successful for user: \(authResult.user.uid)")
             
-            logger.info("Sign in successful for user: \(authResult.user.uid)")
+            // 2. Fetch custom User from Firestore
+            let user = try await getFirestoreService().getUserProfile(userId: authResult.user.uid)
+            
+            // 3. Update presence to online
+            try await getFirestoreService().updateUserPresence(userId: user.userId, presence: .online)
+            
+            // 4. Fetch updated user with online presence
+            let updatedUser = try await getFirestoreService().getUserProfile(userId: authResult.user.uid)
+            
+            // 5. Set current user
+            self.currentUser = updatedUser
+            self.isAuthenticated = true
+            
+            logger.info("Sign in complete for user: \(updatedUser.displayName)")
             
         } catch let error as NSError {
             logger.error("Sign in failed: \(error.localizedDescription)")
@@ -78,10 +146,16 @@ class AuthService: ObservableObject {
     
     /// Signs out the current user
     /// - Throws: AuthError if sign out fails
-    func signOut() throws {
+    func signOut() async throws {
         do {
+            // Update presence to offline before signing out
+            if let userId = currentUser?.userId {
+                try? await getFirestoreService().updateUserPresence(userId: userId, presence: .offline)
+            }
+            
             try Auth.auth().signOut()
             self.currentUser = nil
+            self.isAuthenticated = false
             logger.info("User signed out successfully")
             
         } catch let error as NSError {
