@@ -10,6 +10,7 @@ import SwiftUI
 struct ConversationListView: View {
     
     @EnvironmentObject var authViewModel: AuthViewModel
+    @EnvironmentObject var themeManager: ThemeManager
     @State private var showSettings: Bool = false
     
     var body: some View {
@@ -46,6 +47,8 @@ struct ConversationListView: View {
             .sheet(isPresented: $showSettings) {
                 SettingsView()
                     .environmentObject(authViewModel)
+                    .environmentObject(themeManager)
+                    .preferredColorScheme(themeManager.preferredColorScheme)
             }
         }
     }
@@ -54,5 +57,6 @@ struct ConversationListView: View {
 #Preview {
     ConversationListView()
         .environmentObject(AuthViewModel())
+        .environmentObject(ThemeManager())
 }
 

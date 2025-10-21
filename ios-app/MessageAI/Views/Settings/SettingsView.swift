@@ -12,6 +12,7 @@ struct SettingsView: View {
     // MARK: - View Model
     
     @EnvironmentObject var authViewModel: AuthViewModel
+    @EnvironmentObject var themeManager: ThemeManager
     
     // MARK: - State Properties
     
@@ -23,6 +24,23 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
+                // Appearance Section
+                Section("Appearance") {
+                    NavigationLink(destination: ThemeSelectionView()) {
+                        HStack {
+                            Image(systemName: "paintbrush")
+                                .foregroundStyle(.blue)
+                            Text("Theme")
+                            Spacer()
+                            Text(themeDisplayName(themeManager.currentTheme))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .accessibilityLabel("Theme")
+                    .accessibilityHint("Change the app's appearance")
+                    .accessibilityValue(themeDisplayName(themeManager.currentTheme))
+                }
+                
                 // Account Section
                 Section("Account") {
                     // Logout Button
@@ -73,6 +91,22 @@ struct SettingsView: View {
         authViewModel.signOut()
         dismiss()
     }
+    
+    // MARK: - Helper Methods
+    
+    /// Returns a display-friendly name for a theme preference
+    /// - Parameter theme: The theme preference
+    /// - Returns: A readable string representation of the theme
+    private func themeDisplayName(_ theme: ThemePreference) -> String {
+        switch theme {
+        case .system:
+            return "System Default"
+        case .light:
+            return "Light"
+        case .dark:
+            return "Dark"
+        }
+    }
 }
 
 // MARK: - Preview
@@ -80,5 +114,6 @@ struct SettingsView: View {
 #Preview {
     SettingsView()
         .environmentObject(AuthViewModel())
+        .environmentObject(ThemeManager())
 }
 

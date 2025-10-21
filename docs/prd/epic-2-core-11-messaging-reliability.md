@@ -2,6 +2,23 @@
 
 **Epic Goal**: Implement the primary 1:1 chat functionality (FR1), real-time message delivery (FR2), message timestamps (FR5), local persistence (NFR1), and optimistic UI updates (NFR2).
 
+## Story 2.0: Start New 1:1 Conversation
+
+**As a** user, **I want to** start a new 1:1 conversation with another user, **so that** I can begin messaging someone for the first time.
+
+**Acceptance Criteria**
+- A user can access a "New Message" or "Start Chat" button from the Conversation List View.
+- Tapping the button opens a user search/selection interface.
+- A user can search for other users by display name or email address.
+- Search results display matching users with their display name.
+- When a user selects another user from search results, the system checks if a conversation already exists between them.
+- If a conversation already exists, the user is navigated to that existing Chat View with message history.
+- If no conversation exists, the user is navigated to an empty Chat View (no conversation document created yet).
+- The empty Chat View shows a "Start the conversation" state with the message input bar enabled.
+- If the user backs out of the empty Chat View without sending a message, no conversation is created.
+- When the user sends the first message in an empty chat, the system creates the conversation document in Firestore AND adds the message.
+- After sending the first message, the conversation appears in the Conversation List View.
+
 ## Story 2.1: View Conversation List
 
 **As a** user, **I want to** see a list of all my existing conversations, **so that** I can select one to continue chatting.

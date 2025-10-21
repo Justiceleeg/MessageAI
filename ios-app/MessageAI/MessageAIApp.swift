@@ -27,11 +27,16 @@ struct message_aiApp: App {
 
     // Auth view model shared across the app
     @StateObject private var authViewModel = AuthViewModel()
+    
+    // Theme manager shared across the app
+    @StateObject private var themeManager = ThemeManager()
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environmentObject(authViewModel)
+                .environmentObject(themeManager)
+                .preferredColorScheme(themeManager.preferredColorScheme)
         }
         .modelContainer(PersistenceController.shared.modelContainer)
     }

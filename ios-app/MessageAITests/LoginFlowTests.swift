@@ -6,6 +6,7 @@
 //
 
 import XCTest
+import FirebaseAuth
 @testable import MessageAI
 
 @MainActor
@@ -15,6 +16,16 @@ final class LoginFlowTests: XCTestCase {
     
     override func setUp() async throws {
         try await super.setUp()
+        
+        // Sign out any existing user to ensure clean test state
+        // This is critical because Firebase Auth persists sessions
+        if Auth.auth().currentUser != nil {
+            try? Auth.auth().signOut()
+        }
+        
+        // Add a small delay to ensure Firebase Auth state is fully cleared
+        try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
+        
         authViewModel = AuthViewModel()
     }
     
