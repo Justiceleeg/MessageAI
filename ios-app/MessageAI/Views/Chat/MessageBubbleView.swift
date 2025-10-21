@@ -32,7 +32,6 @@ struct MessageBubbleView: View {
                         RoundedRectangle(cornerRadius: 18)
                             .fill(isSentByCurrentUser ? Color.blue : Color(uiColor: .systemGray5))
                     )
-                    .frame(maxWidth: .infinity)
                     .fixedSize(horizontal: false, vertical: true)
                 
                 if !isSentByCurrentUser {

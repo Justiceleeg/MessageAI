@@ -19,10 +19,17 @@ struct ConversationListView: View {
     
     @StateObject private var viewModel: ConversationListViewModel
     @State private var showSettings: Bool = false
+    @State private var showNewMessage: Bool = false
+    
+    // Store service references for UserSearchView
+    private let firestoreService: FirestoreService
+    private let authService: AuthService
     
     // MARK: - Initialization
     
     init(firestoreService: FirestoreService, authService: AuthService) {
+        self.firestoreService = firestoreService
+        self.authService = authService
         _viewModel = StateObject(wrappedValue: ConversationListViewModel(
             firestoreService: firestoreService,
             authService: authService,
@@ -49,7 +56,7 @@ struct ConversationListView: View {
             .navigationTitle("Messages")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
+                ToolbarItem(placement: .navigationBarLeading) {
                     Button(action: {
                         showSettings = true
                     }) {
@@ -59,12 +66,29 @@ struct ConversationListView: View {
                     .accessibilityLabel("Settings")
                     .accessibilityHint("Open settings and account options")
                 }
+                
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: {
+                        showNewMessage = true
+                    }) {
+                        Image(systemName: "square.and.pencil")
+                            .foregroundStyle(.blue)
+                    }
+                    .accessibilityLabel("New Message")
+                    .accessibilityHint("Start a new conversation")
+                }
             }
             .sheet(isPresented: $showSettings) {
                 SettingsView()
                     .environmentObject(authViewModel)
                     .environmentObject(themeManager)
                     .preferredColorScheme(themeManager.preferredColorScheme)
+            }
+            .sheet(isPresented: $showNewMessage) {
+                UserSearchView(
+                    firestoreService: firestoreService,
+                    authService: authService
+                )
             }
             .alert("Error", isPresented: .constant(viewModel.errorMessage != nil)) {
                 Button("OK") {

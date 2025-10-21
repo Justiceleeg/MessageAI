@@ -102,7 +102,7 @@ struct ChatView: View {
                 // Messages list
                 ScrollViewReader { scrollProxy in
                     ScrollView {
-                        LazyVStack(spacing: 8) {
+                        LazyVStack(alignment: .leading, spacing: 8) {
                             ForEach(viewModel.messages) { message in
                                 MessageBubbleView(
                                     message: message,
@@ -112,6 +112,8 @@ struct ChatView: View {
                             }
                         }
                         .padding(.vertical, 8)
+                        .padding(.horizontal, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .background(Color(uiColor: .systemGroupedBackground))
                     .onChange(of: viewModel.messages) { _, newMessages in

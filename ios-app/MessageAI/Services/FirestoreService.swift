@@ -134,6 +134,112 @@ class FirestoreService: ObservableObject {
         }
     }
     
+    // MARK: - User Search Methods
+    
+    /// Search for users by display name or email (Story 2.0)
+    /// - Parameters:
+    ///   - query: Search query string
+    ///   - currentUserId: Current user's ID to exclude from results
+    /// - Returns: Array of matching User models (limited to 20 results)
+    /// - Throws: FirestoreError if the operation fails
+    func searchUsers(query: String, currentUserId: String) async throws -> [User] {
+        logger.info("Searching users with query: \(query)")
+        
+        guard !query.isEmpty else {
+            return []
+        }
+        
+        do {
+            // MVP approach: Fetch limited users and filter client-side
+            // Note: Firestore doesn't support case-insensitive or "contains" queries natively
+            // For production, consider using Algolia or Firebase Extensions for full-text search
+            let snapshot = try await db.collection("users")
+                .limit(to: 100)  // Reasonable limit for MVP
+                .getDocuments()
+            
+            let users = snapshot.documents
+                .compactMap { doc -> User? in
+                    guard let user = User(document: doc) else {
+                        logger.warning("Failed to parse user document: \(doc.documentID)")
+                        return nil
+                    }
+                    return user
+                }
+                .filter { user in
+                    // Exclude current user
+                    guard user.userId != currentUserId else { return false }
+                    
+                    // Case-insensitive search in display name
+                    if user.displayName.localizedCaseInsensitiveContains(query) {
+                        return true
+                    }
+                    
+                    // Also search in email if available
+                    if let email = user.email, email.localizedCaseInsensitiveContains(query) {
+                        return true
+                    }
+                    
+                    return false
+                }
+            
+            // Limit results to 20 for UI performance
+            let limitedResults = Array(users.prefix(20))
+            
+            logger.info("Found \(limitedResults.count) users matching query: \(query)")
+            return limitedResults
+            
+        } catch {
+            logger.error("Failed to search users: \(error.localizedDescription)")
+            throw FirestoreError.readFailed(error.localizedDescription)
+        }
+    }
+    
+    /// Find existing 1:1 conversation between two users (Story 2.0)
+    /// - Parameters:
+    ///   - userId1: First user's ID
+    ///   - userId2: Second user's ID
+    /// - Returns: Existing Conversation if found, nil otherwise
+    /// - Throws: FirestoreError if the operation fails
+    func findConversation(userId1: String, userId2: String) async throws -> Conversation? {
+        logger.info("Finding conversation between userId1: \(userId1) and userId2: \(userId2)")
+        
+        do {
+            // Query conversations where userId1 is a participant
+            let snapshot = try await db.collection("conversations")
+                .whereField("participants", arrayContains: userId1)
+                .getDocuments()
+            
+            // Filter client-side for conversations that contain both users and are 1:1
+            let conversation = snapshot.documents
+                .compactMap { doc -> Conversation? in
+                    guard let conv = Conversation(document: doc) else {
+                        logger.warning("Failed to parse conversation document: \(doc.documentID)")
+                        return nil
+                    }
+                    return conv
+                }
+                .first { conv in
+                    // Must contain both users, be exactly 2 participants, and not be a group chat
+                    conv.participants.contains(userId1) &&
+                    conv.participants.contains(userId2) &&
+                    conv.participants.count == 2 &&
+                    !conv.isGroupChat
+                }
+            
+            if let conversation = conversation {
+                logger.info("Found existing conversation: \(conversation.conversationId)")
+            } else {
+                logger.info("No existing conversation found between users")
+            }
+            
+            return conversation
+            
+        } catch {
+            logger.error("Failed to find conversation: \(error.localizedDescription)")
+            throw FirestoreError.readFailed(error.localizedDescription)
+        }
+    }
+    
     // MARK: - Conversation Methods
     
     /// Listen to conversations for a specific user with real-time updates
@@ -367,6 +473,7 @@ class FirestoreService: ObservableObject {
             let conversationData: [String: Any] = [
                 "conversationId": conversationId,
                 "participants": participants,
+                "isGroupChat": participants.count > 2,
                 "lastMessageText": text,
                 "lastMessageTimestamp": FieldValue.serverTimestamp(),
                 "createdAt": FieldValue.serverTimestamp()
