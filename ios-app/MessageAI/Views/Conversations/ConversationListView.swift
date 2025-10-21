@@ -10,6 +10,7 @@ import SwiftUI
 struct ConversationListView: View {
     
     @EnvironmentObject var authViewModel: AuthViewModel
+    @State private var showSettings: Bool = false
     
     var body: some View {
         NavigationStack {
@@ -27,17 +28,25 @@ struct ConversationListView: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal)
-                
-                Spacer()
-                    .frame(height: 40)
-                
-                Button("Sign Out") {
-                    authViewModel.signOut()
-                }
-                .buttonStyle(.borderedProminent)
             }
             .padding()
             .navigationTitle("Messages")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: {
+                        showSettings = true
+                    }) {
+                        Image(systemName: "gearshape.fill")
+                            .foregroundStyle(.blue)
+                    }
+                    .accessibilityLabel("Settings")
+                    .accessibilityHint("Open settings and account options")
+                }
+            }
+            .sheet(isPresented: $showSettings) {
+                SettingsView()
+                    .environmentObject(authViewModel)
+            }
         }
     }
 }

@@ -48,7 +48,7 @@ struct RootView: View {
             if authViewModel.isAuthenticated {
                 ConversationListView()
             } else {
-                SignUpView()
+                LoginView()
             }
         }
     }

@@ -1,13 +1,13 @@
 //
-//  SignUpView.swift
+//  LoginView.swift
 //  MessageAI
 //
-//  Created by Justice Perez White on 10/20/25.
+//  Created by Dev Agent (James) on 10/21/25.
 //
 
 import SwiftUI
 
-struct SignUpView: View {
+struct LoginView: View {
 
     // MARK: - View Model
 
@@ -15,16 +15,15 @@ struct SignUpView: View {
 
     // MARK: - State Properties
 
-    @State private var displayName: String = ""
     @State private var email: String = ""
     @State private var password: String = ""
     @State private var isPasswordVisible: Bool = false
-    @State private var showLoginView: Bool = false
+    @State private var showSignUpView: Bool = false
 
     // MARK: - Computed Properties
 
     private var isFormValid: Bool {
-        !displayName.isEmpty && isEmailValid && isPasswordValid
+        isEmailValid && isPasswordValid
     }
 
     private var isEmailValid: Bool {
@@ -37,18 +36,6 @@ struct SignUpView: View {
         password.count >= 6
     }
 
-    private var passwordStrength: PasswordStrength {
-        if password.isEmpty {
-            return .none
-        } else if password.count < 6 {
-            return .weak
-        } else if password.count < 10 {
-            return .medium
-        } else {
-            return .strong
-        }
-    }
-
     // MARK: - Body
 
     var body: some View {
@@ -57,27 +44,25 @@ struct SignUpView: View {
                 ScrollView {
                     VStack(spacing: 24) {
                         Spacer()
-                            .frame(minHeight: 40)
+                            .frame(minHeight: 60)
 
                         // Header
                         headerSection
 
                         // Form Fields
                         VStack(spacing: 16) {
-                            displayNameField
                             emailField
                             passwordField
-                            passwordStrengthIndicator
                         }
                         .padding(.horizontal, 32)
 
-                        // Sign Up Button
-                        signUpButton
+                        // Log In Button
+                        loginButton
                             .padding(.horizontal, 32)
                             .padding(.top, 8)
 
-                        // Login Link
-                        loginLink
+                        // Sign Up Link
+                        signUpLink
                             .padding(.top, 16)
 
                         Spacer()
@@ -86,7 +71,7 @@ struct SignUpView: View {
                     .frame(minHeight: geometry.size.height)
                 }
             }
-            .alert("Sign Up Error", isPresented: .constant(viewModel.errorMessage != nil)) {
+            .alert("Login Error", isPresented: .constant(viewModel.errorMessage != nil)) {
                 Button("OK", role: .cancel) {
                     viewModel.clearError()
                 }
@@ -107,8 +92,8 @@ struct SignUpView: View {
                     }
                 }
             }
-            .navigationDestination(isPresented: $showLoginView) {
-                LoginView()
+            .navigationDestination(isPresented: $showSignUpView) {
+                SignUpView()
                     .environmentObject(viewModel)
             }
         }
@@ -123,31 +108,15 @@ struct SignUpView: View {
                 .foregroundStyle(.blue)
                 .accessibilityHidden(true)
 
-            Text("Join MessageAI")
+            Text("Welcome Back")
                 .font(.title2)
                 .fontWeight(.semibold)
 
-            Text("Create your account to get started")
+            Text("Log in to your account")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
         .padding(.bottom, 16)
-    }
-
-    private var displayNameField: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Display Name")
-                .font(.subheadline)
-                .fontWeight(.medium)
-                .foregroundStyle(.secondary)
-
-            TextField("Enter your name", text: $displayName)
-                .textFieldStyle(.roundedBorder)
-                .textContentType(.name)
-                .autocapitalization(.words)
-                .accessibilityLabel("Display Name")
-                .accessibilityHint("Enter your display name")
-        }
     }
 
     private var emailField: some View {
@@ -189,10 +158,10 @@ struct SignUpView: View {
                         SecureField("Enter your password", text: $password)
                     }
                 }
-                .textContentType(.newPassword)
+                .textContentType(.password)
                 .autocapitalization(.none)
                 .accessibilityLabel("Password")
-                .accessibilityHint("Enter a password with at least 6 characters")
+                .accessibilityHint("Enter your password")
 
                 Button(action: {
                     isPasswordVisible.toggle()
@@ -221,43 +190,9 @@ struct SignUpView: View {
         }
     }
 
-    private var passwordStrengthIndicator: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if !password.isEmpty {
-                HStack {
-                    Text("Password Strength:")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    Text(passwordStrength.title)
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundStyle(passwordStrength.color)
-                }
-
-                GeometryReader { geometry in
-                    ZStack(alignment: .leading) {
-                        // Background
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(Color(.systemGray5))
-                            .frame(height: 4)
-
-                        // Progress
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(passwordStrength.color)
-                            .frame(
-                                width: geometry.size.width * passwordStrength.progress, height: 4)
-                    }
-                }
-                .frame(height: 4)
-                .accessibilityLabel("Password strength: \(passwordStrength.title)")
-            }
-        }
-    }
-
-    private var signUpButton: some View {
-        Button(action: handleSignUp) {
-            Text("Sign Up")
+    private var loginButton: some View {
+        Button(action: handleLogin) {
+            Text("Log In")
                 .fontWeight(.semibold)
                 .frame(maxWidth: .infinity)
                 .padding()
@@ -266,68 +201,32 @@ struct SignUpView: View {
                 .cornerRadius(12)
         }
         .disabled(!isFormValid)
-        .accessibilityLabel("Sign Up")
-        .accessibilityHint(isFormValid ? "Creates your account" : "Fill out all fields to enable")
+        .accessibilityLabel("Log In")
+        .accessibilityHint(isFormValid ? "Log in to your account" : "Fill out all fields to enable")
     }
 
-    private var loginLink: some View {
+    private var signUpLink: some View {
         Button(action: {
-            showLoginView = true
+            showSignUpView = true
         }) {
             HStack(spacing: 4) {
-                Text("Already have an account?")
+                Text("Don't have an account?")
                     .foregroundStyle(.secondary)
-                Text("Log In")
+                Text("Sign Up")
                     .fontWeight(.semibold)
                     .foregroundStyle(.blue)
             }
             .font(.subheadline)
         }
-        .accessibilityLabel("Already have an account? Log In")
-        .accessibilityHint("Navigate to login screen")
+        .accessibilityLabel("Don't have an account? Sign Up")
+        .accessibilityHint("Navigate to sign up screen")
     }
 
     // MARK: - Actions
 
-    private func handleSignUp() {
+    private func handleLogin() {
         Task {
-            await viewModel.signUp(email: email, password: password, displayName: displayName)
-        }
-    }
-}
-
-// MARK: - Password Strength
-
-private enum PasswordStrength {
-    case none
-    case weak
-    case medium
-    case strong
-
-    var title: String {
-        switch self {
-        case .none: return ""
-        case .weak: return "Weak"
-        case .medium: return "Medium"
-        case .strong: return "Strong"
-        }
-    }
-
-    var color: Color {
-        switch self {
-        case .none: return .clear
-        case .weak: return .red
-        case .medium: return .orange
-        case .strong: return .green
-        }
-    }
-
-    var progress: CGFloat {
-        switch self {
-        case .none: return 0
-        case .weak: return 0.33
-        case .medium: return 0.66
-        case .strong: return 1.0
+            await viewModel.signIn(email: email, password: password)
         }
     }
 }
@@ -335,6 +234,7 @@ private enum PasswordStrength {
 // MARK: - Preview
 
 #Preview {
-    SignUpView()
+    LoginView()
         .environmentObject(AuthViewModel())
 }
+

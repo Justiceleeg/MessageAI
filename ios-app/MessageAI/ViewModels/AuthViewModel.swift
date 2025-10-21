@@ -79,11 +79,13 @@ final class AuthViewModel: ObservableObject {
             // Handle authentication errors
             logger.error("Sign-up failed with AuthError: \(error.localizedDescription)")
             errorMessage = error.localizedDescription
+            isAuthenticated = false
             
         } catch let error as FirestoreError {
             // Handle Firestore errors
             logger.error("Sign-up failed with FirestoreError: \(error.localizedDescription)")
             errorMessage = error.localizedDescription
+            isAuthenticated = false
             
             // Note: User was created in Firebase Auth but profile creation failed
             // In a production app, you might want to handle this with retry logic
@@ -93,6 +95,7 @@ final class AuthViewModel: ObservableObject {
             // Handle unexpected errors
             logger.error("Sign-up failed with unexpected error: \(error.localizedDescription)")
             errorMessage = "An unexpected error occurred. Please try again."
+            isAuthenticated = false
         }
     }
     
@@ -120,10 +123,12 @@ final class AuthViewModel: ObservableObject {
         } catch let error as AuthError {
             logger.error("Sign-in failed: \(error.localizedDescription)")
             errorMessage = error.localizedDescription
+            isAuthenticated = false
             
         } catch {
             logger.error("Sign-in failed with unexpected error: \(error.localizedDescription)")
             errorMessage = "An unexpected error occurred. Please try again."
+            isAuthenticated = false
         }
     }
     
