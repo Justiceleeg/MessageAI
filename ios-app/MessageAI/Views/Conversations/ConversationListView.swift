@@ -20,6 +20,7 @@ struct ConversationListView: View {
     @StateObject private var viewModel: ConversationListViewModel
     @State private var showSettings: Bool = false
     @State private var showNewMessage: Bool = false
+    @State private var showNewGroupChat: Bool = false
     
     // Store service references for UserSearchView
     private let firestoreService: FirestoreService
@@ -68,14 +69,23 @@ struct ConversationListView: View {
                 }
                 
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: {
-                        showNewMessage = true
-                    }) {
+                    Menu {
+                        Button(action: {
+                            showNewMessage = true
+                        }) {
+                            Label("New Message", systemImage: "bubble.left")
+                        }
+                        
+                        Button(action: {
+                            showNewGroupChat = true
+                        }) {
+                            Label("New Group Chat", systemImage: "person.3.fill")
+                        }
+                    } label: {
                         Image(systemName: "square.and.pencil")
                             .foregroundStyle(.blue)
                     }
-                    .accessibilityLabel("New Message")
-                    .accessibilityHint("Start a new conversation")
+                    .accessibilityLabel("New conversation menu")
                 }
             }
             .sheet(isPresented: $showSettings) {
@@ -87,7 +97,15 @@ struct ConversationListView: View {
             .sheet(isPresented: $showNewMessage) {
                 UserSearchView(
                     firestoreService: firestoreService,
-                    authService: authService
+                    authService: authService,
+                    isGroupMode: false
+                )
+            }
+            .sheet(isPresented: $showNewGroupChat) {
+                UserSearchView(
+                    firestoreService: firestoreService,
+                    authService: authService,
+                    isGroupMode: true
                 )
             }
             .alert("Error", isPresented: .constant(viewModel.errorMessage != nil)) {
@@ -188,17 +206,25 @@ struct ConversationRow: View {
     
     var body: some View {
         HStack(spacing: 12) {
-            // Avatar
+            // Avatar (group icon for groups, initials for 1:1)
             avatar
             
             // Content
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    // Display name
-                    Text(displayName)
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
+                    // Display name (with group icon if group chat)
+                    HStack(spacing: 6) {
+                        if conversation.isGroupChat {
+                            Image(systemName: "person.3.fill")
+                                .font(.system(size: 14))
+                                .foregroundStyle(.blue)
+                        }
+                        
+                        Text(displayName)
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                    }
                     
                     Spacer()
                     
@@ -208,7 +234,7 @@ struct ConversationRow: View {
                         .foregroundStyle(.secondary)
                 }
                 
-                // Message preview
+                // Message preview (with sender name prefix for groups)
                 if let lastMessage = conversation.lastMessageText {
                     Text(lastMessage)
                         .font(.system(size: 15))
@@ -225,15 +251,23 @@ struct ConversationRow: View {
         .padding(.vertical, 8)
     }
     
-    /// Avatar circle with initials
+    /// Avatar circle with initials or group icon
     private var avatar: some View {
         Circle()
             .fill(avatarColor)
             .frame(width: 50, height: 50)
             .overlay(
-                Text(avatarInitials)
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(.white)
+                Group {
+                    if conversation.isGroupChat {
+                        Image(systemName: "person.3.fill")
+                            .font(.system(size: 24, weight: .bold))
+                            .foregroundStyle(.white)
+                    } else {
+                        Text(avatarInitials)
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundStyle(.white)
+                    }
+                }
             )
     }
     

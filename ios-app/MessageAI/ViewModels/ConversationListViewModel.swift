@@ -102,14 +102,47 @@ final class ConversationListViewModel: ObservableObject {
         return otherUserId
     }
     
-    /// Get the other participant's display name in a 1:1 conversation
+    /// Get display name for conversation (handles both 1:1 and group chats)
     func getOtherParticipantName(for conversation: Conversation) -> String {
+        // For group chats, use group name or formatted participant list
+        if conversation.isGroupChat {
+            return getGroupDisplayName(for: conversation)
+        }
+        
+        // For 1:1 chats, show the other user's name
         guard let currentUserId = authService.currentUser?.userId,
               let otherUserId = conversation.otherParticipantId(currentUserId: currentUserId) else {
             return "Unknown"
         }
         
         return getDisplayName(for: otherUserId)
+    }
+    
+    /// Get display name for a group chat
+    private func getGroupDisplayName(for conversation: Conversation) -> String {
+        // If group has a name, use it
+        if let groupName = conversation.groupName, !groupName.isEmpty {
+            return groupName
+        }
+        
+        // Otherwise, format participant names
+        guard let currentUserId = authService.currentUser?.userId else {
+            return "Group Chat"
+        }
+        
+        // Get names of other participants (excluding current user)
+        let otherParticipants = conversation.participants.filter { $0 != currentUserId }
+        let names = otherParticipants.map { getDisplayName(for: $0) }
+        
+        // Format based on count
+        if names.isEmpty {
+            return "Group Chat"
+        } else if names.count <= 3 {
+            return names.joined(separator: ", ")
+        } else {
+            let shown = names.prefix(2).joined(separator: ", ")
+            return "\(shown), +\(names.count - 2) more"
+        }
     }
     
     // MARK: - Private Methods

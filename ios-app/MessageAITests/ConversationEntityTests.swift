@@ -218,5 +218,169 @@ final class ConversationEntityTests: XCTestCase {
         XCTAssertEqual(fetchedMessages.count, 1)
         XCTAssertEqual(fetchedMessages.first?.messageId, "msg123")
     }
+    
+    // MARK: - Group Chat Tests
+    
+    func testConversationEntityInit_WithThreeParticipants_CreatesGroupEntity() {
+        // Act
+        let entity = ConversationEntity(
+            conversationId: "groupConv123",
+            participants: ["user1", "user2", "user3"],
+            lastMessageText: "Hello group!",
+            lastMessageTimestamp: Date(),
+            isGroupChat: true
+        )
+        
+        // Assert
+        XCTAssertEqual(entity.conversationId, "groupConv123")
+        XCTAssertEqual(entity.participants.count, 3)
+        XCTAssertEqual(entity.lastMessageText, "Hello group!")
+        XCTAssertTrue(entity.isGroupChat)
+    }
+    
+    func testConversationEntityInit_WithGroupName_StoresGroupName() {
+        // Act
+        let entity = ConversationEntity(
+            conversationId: "groupConv123",
+            participants: ["user1", "user2", "user3"],
+            isGroupChat: true,
+            groupName: "Team Alpha"
+        )
+        
+        // Assert
+        XCTAssertEqual(entity.groupName, "Team Alpha")
+        XCTAssertTrue(entity.isGroupChat)
+    }
+    
+    func testGroupPersistence_WithGroupName_SavesAndLoads() throws {
+        // Arrange
+        let entity = ConversationEntity(
+            conversationId: "groupConv123",
+            participants: ["user1", "user2", "user3"],
+            lastMessageText: "Group message",
+            lastMessageTimestamp: Date(),
+            isGroupChat: true,
+            groupName: "Study Group"
+        )
+        
+        // Act - Insert
+        modelContext.insert(entity)
+        try modelContext.save()
+        
+        // Act - Fetch
+        let descriptor = FetchDescriptor<ConversationEntity>()
+        let fetchedEntities = try modelContext.fetch(descriptor)
+        
+        // Assert
+        XCTAssertEqual(fetchedEntities.count, 1)
+        let fetchedEntity = try XCTUnwrap(fetchedEntities.first)
+        XCTAssertEqual(fetchedEntity.conversationId, "groupConv123")
+        XCTAssertEqual(fetchedEntity.participants.count, 3)
+        XCTAssertEqual(fetchedEntity.groupName, "Study Group")
+        XCTAssertTrue(fetchedEntity.isGroupChat)
+    }
+    
+    func testGroupPersistence_WithoutGroupName_SavesAndLoads() throws {
+        // Arrange
+        let entity = ConversationEntity(
+            conversationId: "groupConv456",
+            participants: ["user1", "user2", "user3", "user4"],
+            lastMessageText: "Another group message",
+            lastMessageTimestamp: Date(),
+            isGroupChat: true
+        )
+        
+        // Act - Insert
+        modelContext.insert(entity)
+        try modelContext.save()
+        
+        // Act - Fetch
+        let descriptor = FetchDescriptor<ConversationEntity>()
+        let fetchedEntities = try modelContext.fetch(descriptor)
+        
+        // Assert
+        XCTAssertEqual(fetchedEntities.count, 1)
+        let fetchedEntity = try XCTUnwrap(fetchedEntities.first)
+        XCTAssertEqual(fetchedEntity.conversationId, "groupConv456")
+        XCTAssertEqual(fetchedEntity.participants.count, 4)
+        XCTAssertNil(fetchedEntity.groupName)
+        XCTAssertTrue(fetchedEntity.isGroupChat)
+    }
+    
+    func testToConversation_WithGroupName_ConvertsCorrectly() {
+        // Arrange
+        let date = Date()
+        let entity = ConversationEntity(
+            conversationId: "groupConv123",
+            participants: ["user1", "user2", "user3"],
+            lastMessageText: "Group test",
+            lastMessageTimestamp: date,
+            isGroupChat: true,
+            groupName: "Project Team"
+        )
+        
+        // Act
+        let conversation = entity.toConversation()
+        
+        // Assert
+        XCTAssertEqual(conversation.conversationId, "groupConv123")
+        XCTAssertEqual(conversation.participants.count, 3)
+        XCTAssertEqual(conversation.groupName, "Project Team")
+        XCTAssertTrue(conversation.isGroupChat)
+        XCTAssertEqual(conversation.lastMessageTimestamp, date)
+    }
+    
+    func testFromConversation_WithGroupName_CreatesEntityCorrectly() {
+        // Arrange
+        let date = Date()
+        let conversation = Conversation(
+            conversationId: "groupConv123",
+            participants: ["user1", "user2", "user3"],
+            lastMessageText: "Group test",
+            lastMessageTimestamp: date,
+            isGroupChat: true,
+            groupName: "Development Team"
+        )
+        
+        // Act
+        let entity = ConversationEntity.from(conversation: conversation)
+        
+        // Assert
+        XCTAssertEqual(entity.conversationId, "groupConv123")
+        XCTAssertEqual(entity.participants.count, 3)
+        XCTAssertEqual(entity.groupName, "Development Team")
+        XCTAssertTrue(entity.isGroupChat)
+    }
+    
+    func testUpdateFromConversation_WithGroupName_UpdatesCorrectly() {
+        // Arrange
+        let entity = ConversationEntity(
+            conversationId: "groupConv123",
+            participants: ["user1", "user2"],
+            lastMessageText: "Old",
+            lastMessageTimestamp: Date(timeIntervalSince1970: 0),
+            isGroupChat: false,
+            groupName: nil
+        )
+        
+        let newDate = Date()
+        let updatedConversation = Conversation(
+            conversationId: "groupConv123",
+            participants: ["user1", "user2", "user3"],
+            lastMessageText: "New group message",
+            lastMessageTimestamp: newDate,
+            isGroupChat: true,
+            groupName: "Updated Team"
+        )
+        
+        // Act
+        entity.update(from: updatedConversation)
+        
+        // Assert
+        XCTAssertEqual(entity.participants.count, 3)
+        XCTAssertEqual(entity.lastMessageText, "New group message")
+        XCTAssertTrue(entity.isGroupChat)
+        XCTAssertEqual(entity.groupName, "Updated Team")
+    }
 }
 

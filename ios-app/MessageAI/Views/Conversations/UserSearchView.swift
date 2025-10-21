@@ -20,13 +20,22 @@ struct UserSearchView: View {
     @State private var selectedOtherUserId: String?
     @State private var navigateToChat: Bool = false
     
+    // Group chat state
+    @State private var isGroupMode: Bool = false
+    @State private var selectedUsers: [User] = []
+    @State private var showGroupNameEntry: Bool = false
+    @State private var pendingGroupName: String?
+    @State private var pendingGroupParticipants: [User] = []
+    @State private var isCreatingGroup: Bool = false
+    
     // MARK: - Initialization
     
-    init(firestoreService: FirestoreService, authService: AuthService) {
+    init(firestoreService: FirestoreService, authService: AuthService, isGroupMode: Bool = false) {
         _viewModel = StateObject(wrappedValue: UserSearchViewModel(
             firestoreService: firestoreService,
             authService: authService
         ))
+        _isGroupMode = State(initialValue: isGroupMode)
     }
     
     // MARK: - Body
@@ -40,7 +49,7 @@ struct UserSearchView: View {
                 // Content
                 contentView
             }
-            .navigationTitle("New Message")
+            .navigationTitle(isGroupMode ? "New Group" : "New Message")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -48,14 +57,40 @@ struct UserSearchView: View {
                         dismiss()
                     }
                 }
+                
+                // Show Next button in group mode when 2+ users selected
+                if isGroupMode && selectedUsers.count >= 2 {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Next") {
+                            showGroupNameEntry = true
+                        }
+                    }
+                }
             }
             .navigationDestination(isPresented: $navigateToChat) {
-                if let otherUserId = selectedOtherUserId {
+                if !pendingGroupParticipants.isEmpty {
+                    // Group chat navigation (lazy creation)
+                    ChatView(
+                        conversationId: nil,
+                        otherUserId: "", // Not used for groups
+                        groupParticipants: pendingGroupParticipants,
+                        groupName: pendingGroupName
+                    )
+                } else if let otherUserId = selectedOtherUserId {
+                    // 1:1 chat navigation
                     ChatView(
                         conversationId: selectedConversationId,
                         otherUserId: otherUserId
                     )
                 }
+            }
+            .sheet(isPresented: $showGroupNameEntry) {
+                GroupNameEntryView(
+                    selectedUsers: selectedUsers,
+                    onCreateGroup: { name in
+                        createGroupChat(withName: name)
+                    }
+                )
             }
             .alert("Error", isPresented: .constant(viewModel.errorMessage != nil)) {
                 Button("OK") {
@@ -167,11 +202,21 @@ struct UserSearchView: View {
             Button(action: {
                 handleUserSelection(user)
             }) {
-                UserSearchRow(user: user)
+                HStack {
+                    UserSearchRow(user: user)
+                    
+                    // Show checkmark in group mode if user is selected
+                    if isGroupMode && selectedUsers.contains(where: { $0.userId == user.userId }) {
+                        Spacer()
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.blue)
+                            .font(.system(size: 24))
+                    }
+                }
             }
             .listRowSeparator(.visible)
             .accessibilityLabel("User: \(user.displayName)\(user.email != nil ? ", \(user.email!)" : "")")
-            .accessibilityHint("Select user to message")
+            .accessibilityHint(isGroupMode ? "Tap to select for group" : "Select user to message")
         }
         .listStyle(.plain)
     }
@@ -180,22 +225,61 @@ struct UserSearchView: View {
     
     /// Handle user selection from search results
     private func handleUserSelection(_ user: User) {
-        Task {
-            do {
-                // Check if conversation exists
-                let result = try await viewModel.selectUser(user)
-                
-                // Set navigation parameters
-                selectedConversationId = result.conversationId
-                selectedOtherUserId = result.otherUserId
-                
-                // Navigate to chat within the modal
-                navigateToChat = true
-                
-            } catch {
-                // Error is handled by the ViewModel and displayed via alert
+        if isGroupMode {
+            // Group mode: Toggle selection
+            toggleUserSelection(user)
+        } else {
+            // 1:1 mode: Navigate to chat
+            Task {
+                do {
+                    // Check if conversation exists
+                    let result = try await viewModel.selectUser(user)
+                    
+                    // Set navigation parameters
+                    selectedConversationId = result.conversationId
+                    selectedOtherUserId = result.otherUserId
+                    
+                    // Navigate to chat within the modal
+                    navigateToChat = true
+                    
+                } catch {
+                    // Error is handled by the ViewModel and displayed via alert
+                }
             }
         }
+    }
+    
+    /// Toggle user selection in group mode
+    private func toggleUserSelection(_ user: User) {
+        if let index = selectedUsers.firstIndex(where: { $0.userId == user.userId }) {
+            // User already selected, remove them
+            selectedUsers.remove(at: index)
+        } else {
+            // User not selected, add them
+            selectedUsers.append(user)
+        }
+    }
+    
+    /// Prepare to navigate to group chat (lazy creation - no Firestore write yet)
+    private func createGroupChat(withName name: String?) {
+        guard selectedUsers.count >= 2 else {
+            viewModel.errorMessage = "Please select at least 2 other users to create a group chat."
+            return
+        }
+        
+        // Store group data for lazy creation
+        pendingGroupName = name?.isEmpty == false ? name : nil
+        pendingGroupParticipants = selectedUsers
+        
+        // Clear 1:1 chat state
+        selectedConversationId = nil
+        selectedOtherUserId = nil
+        
+        // Close the group name entry sheet
+        showGroupNameEntry = false
+        
+        // Navigate to chat view (will create conversation on first message)
+        navigateToChat = true
     }
 }
 
@@ -262,6 +346,93 @@ struct UserSearchRow: View {
         let hash = abs(user.userId.hashValue)
         let colors: [Color] = [.blue, .green, .orange, .purple, .pink, .red, .indigo, .teal]
         return colors[hash % colors.count]
+    }
+}
+
+// MARK: - Group Name Entry View
+
+/// Sheet for entering optional group name
+struct GroupNameEntryView: View {
+    @Environment(\.dismiss) private var dismiss
+    
+    let selectedUsers: [User]
+    let onCreateGroup: (String?) -> Void
+    
+    @State private var groupName: String = ""
+    @FocusState private var isTextFieldFocused: Bool
+    
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 20) {
+                // Selected users preview
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Participants")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    
+                    Text(formatParticipantNames())
+                        .font(.body)
+                        .foregroundStyle(.primary)
+                }
+                .padding(.horizontal)
+                .padding(.top, 20)
+                
+                // Group name input
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Group Name (Optional)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    
+                    TextField("Enter group name", text: $groupName)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($isTextFieldFocused)
+                        .submitLabel(.done)
+                        .onSubmit {
+                            createGroup()
+                        }
+                }
+                .padding(.horizontal)
+                
+                Spacer()
+            }
+            .navigationTitle("New Group")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Back") {
+                        dismiss()
+                    }
+                }
+                
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Create") {
+                        createGroup()
+                    }
+                }
+            }
+            .onAppear {
+                // Auto-focus text field after a short delay
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    isTextFieldFocused = true
+                }
+            }
+        }
+    }
+    
+    private func formatParticipantNames() -> String {
+        let names = selectedUsers.map { $0.displayName }
+        if names.count <= 3 {
+            return names.joined(separator: ", ")
+        } else {
+            let shown = names.prefix(3).joined(separator: ", ")
+            return "\(shown), +\(names.count - 3) more"
+        }
+    }
+    
+    private func createGroup() {
+        let trimmedName = groupName.trimmingCharacters(in: .whitespacesAndNewlines)
+        onCreateGroup(trimmedName.isEmpty ? nil : trimmedName)
+        dismiss()
     }
 }
 

@@ -13,19 +13,31 @@ struct MessageBubbleView: View {
     let message: Message
     let isSentByCurrentUser: Bool
     let onRetry: (() -> Void)?
+    let isGroupChat: Bool
+    let senderName: String?
     
     // MARK: - Initialization
     
-    init(message: Message, isSentByCurrentUser: Bool, onRetry: (() -> Void)? = nil) {
+    init(message: Message, isSentByCurrentUser: Bool, onRetry: (() -> Void)? = nil, isGroupChat: Bool = false, senderName: String? = nil) {
         self.message = message
         self.isSentByCurrentUser = isSentByCurrentUser
         self.onRetry = onRetry
+        self.isGroupChat = isGroupChat
+        self.senderName = senderName
     }
     
     // MARK: - Body
     
     var body: some View {
         VStack(alignment: isSentByCurrentUser ? .trailing : .leading, spacing: 4) {
+            // Sender name (only for received messages in group chats)
+            if !isSentByCurrentUser && isGroupChat, let senderName = senderName {
+                Text(senderName)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .padding(.leading, 12)
+            }
+            
             // Message bubble
             HStack {
                 if isSentByCurrentUser {

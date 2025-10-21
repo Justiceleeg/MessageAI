@@ -207,5 +207,168 @@ final class ConversationModelTests: XCTestCase {
         // Assert
         XCTAssertEqual(conversationSet.count, 2, "Set should contain only 2 unique conversations (conv1 and conv2)")
     }
+    
+    // MARK: - Group Chat Tests
+    
+    func testConversationInit_WithThreeParticipants_CreatesGroupChat() {
+        // Act
+        let conversation = Conversation(
+            conversationId: "groupConv123",
+            participants: ["user1", "user2", "user3"],
+            lastMessageText: "Hello group!",
+            lastMessageTimestamp: Date(),
+            isGroupChat: true
+        )
+        
+        // Assert
+        XCTAssertEqual(conversation.conversationId, "groupConv123")
+        XCTAssertEqual(conversation.participants.count, 3)
+        XCTAssertEqual(conversation.lastMessageText, "Hello group!")
+        XCTAssertTrue(conversation.isGroupChat)
+    }
+    
+    func testConversationInit_WithGroupName_StoresGroupName() {
+        // Act
+        let conversation = Conversation(
+            conversationId: "groupConv123",
+            participants: ["user1", "user2", "user3"],
+            isGroupChat: true,
+            groupName: "Team Alpha"
+        )
+        
+        // Assert
+        XCTAssertEqual(conversation.groupName, "Team Alpha")
+        XCTAssertTrue(conversation.isGroupChat)
+    }
+    
+    func testConversationInit_WithoutGroupName_HasNilGroupName() {
+        // Act
+        let conversation = Conversation(
+            conversationId: "groupConv123",
+            participants: ["user1", "user2", "user3"],
+            isGroupChat: true
+        )
+        
+        // Assert
+        XCTAssertNil(conversation.groupName)
+    }
+    
+    func testIsGroupChat_WithTwoParticipants_IsFalse() {
+        // Act
+        let conversation = Conversation(
+            conversationId: "conv123",
+            participants: ["user1", "user2"],
+            isGroupChat: false
+        )
+        
+        // Assert
+        XCTAssertFalse(conversation.isGroupChat)
+        XCTAssertEqual(conversation.participants.count, 2)
+    }
+    
+    func testIsGroupChat_WithThreeParticipants_IsTrue() {
+        // Act
+        let conversation = Conversation(
+            conversationId: "groupConv123",
+            participants: ["user1", "user2", "user3"],
+            isGroupChat: true
+        )
+        
+        // Assert
+        XCTAssertTrue(conversation.isGroupChat)
+        XCTAssertEqual(conversation.participants.count, 3)
+    }
+    
+    func testIsGroupChat_WithFourParticipants_IsTrue() {
+        // Act
+        let conversation = Conversation(
+            conversationId: "groupConv123",
+            participants: ["user1", "user2", "user3", "user4"],
+            isGroupChat: true
+        )
+        
+        // Assert
+        XCTAssertTrue(conversation.isGroupChat)
+        XCTAssertEqual(conversation.participants.count, 4)
+    }
+    
+    func testToFirestoreData_WithGroupName_IncludesGroupName() {
+        // Arrange
+        let conversation = Conversation(
+            conversationId: "groupConv123",
+            participants: ["user1", "user2", "user3"],
+            isGroupChat: true,
+            groupName: "Project Team"
+        )
+        
+        // Act
+        let firestoreData = conversation.toFirestoreData()
+        
+        // Assert
+        XCTAssertEqual(firestoreData["groupName"] as? String, "Project Team")
+        XCTAssertEqual(firestoreData["isGroupChat"] as? Bool, true)
+        XCTAssertEqual(firestoreData["participants"] as? [String], ["user1", "user2", "user3"])
+    }
+    
+    func testToFirestoreData_WithoutGroupName_OmitsGroupName() {
+        // Arrange
+        let conversation = Conversation(
+            conversationId: "groupConv123",
+            participants: ["user1", "user2", "user3"],
+            isGroupChat: true
+        )
+        
+        // Act
+        let firestoreData = conversation.toFirestoreData()
+        
+        // Assert
+        XCTAssertNil(firestoreData["groupName"])
+        XCTAssertEqual(firestoreData["isGroupChat"] as? Bool, true)
+    }
+    
+    func testConversationCodable_WithGroupName_EncodesAndDecodes() throws {
+        // Arrange
+        let originalConversation = Conversation(
+            conversationId: "groupConv123",
+            participants: ["user1", "user2", "user3"],
+            lastMessageText: "Group test message",
+            lastMessageTimestamp: Date(),
+            isGroupChat: true,
+            groupName: "Study Group"
+        )
+        
+        // Act - Encode
+        let encoder = JSONEncoder()
+        let data = try encoder.encode(originalConversation)
+        
+        // Act - Decode
+        let decoder = JSONDecoder()
+        let decodedConversation = try decoder.decode(Conversation.self, from: data)
+        
+        // Assert
+        XCTAssertEqual(decodedConversation.conversationId, originalConversation.conversationId)
+        XCTAssertEqual(decodedConversation.participants, originalConversation.participants)
+        XCTAssertEqual(decodedConversation.groupName, originalConversation.groupName)
+        XCTAssertEqual(decodedConversation.isGroupChat, originalConversation.isGroupChat)
+    }
+    
+    func testConversationEquatable_WithDifferentGroupNames_ReturnsNotEqual() {
+        // Arrange
+        let conversation1 = Conversation(
+            conversationId: "conv123",
+            participants: ["user1", "user2", "user3"],
+            isGroupChat: true,
+            groupName: "Team A"
+        )
+        let conversation2 = Conversation(
+            conversationId: "conv123",
+            participants: ["user1", "user2", "user3"],
+            isGroupChat: true,
+            groupName: "Team B"
+        )
+        
+        // Act & Assert
+        XCTAssertNotEqual(conversation1, conversation2, "Conversations with different group names should not be equal")
+    }
 }
 

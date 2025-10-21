@@ -24,6 +24,7 @@ final class ChatViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var conversationId: String?
     @Published var otherUserDisplayName: String = ""
+    @Published var senderNames: [String: String] = [:] // Cache for sender display names (userId -> displayName)
     
     // MARK: - Private Properties
     
@@ -37,6 +38,14 @@ final class ChatViewModel: ObservableObject {
     private var messageListenerTask: Task<Void, Never>?
     private var networkObserverTask: Task<Void, Never>?
     
+    // Group chat properties (for lazy creation)
+    var conversation: Conversation? // Made public for View access
+    private var pendingGroupParticipants: [User]?
+    private var pendingGroupName: String?
+    var isGroupChat: Bool {
+        conversation?.isGroupChat ?? (pendingGroupParticipants != nil)
+    }
+    
     // Computed property for participants array
     private var participants: [String] {
         guard let currentUserId = authService.currentUser?.userId else {
@@ -47,13 +56,15 @@ final class ChatViewModel: ObservableObject {
     
     // MARK: - Initialization
     
-    init(conversationId: String?, otherUserId: String, firestoreService: FirestoreService, authService: AuthService, networkMonitor: NetworkMonitor, offlineQueue: OfflineMessageQueue, modelContext: ModelContext? = nil) {
+    init(conversationId: String?, otherUserId: String, firestoreService: FirestoreService, authService: AuthService, networkMonitor: NetworkMonitor, offlineQueue: OfflineMessageQueue, modelContext: ModelContext? = nil, groupParticipants: [User]? = nil, groupName: String? = nil) {
         self.conversationId = conversationId
         self.otherUserId = otherUserId
         self.firestoreService = firestoreService
         self.authService = authService
         self.networkMonitor = networkMonitor
         self.offlineQueue = offlineQueue
+        self.pendingGroupParticipants = groupParticipants
+        self.pendingGroupName = groupName
         
         // Use provided context or get from shared PersistenceController
         self.modelContext = modelContext ?? PersistenceController.shared.modelContainer.mainContext
@@ -63,14 +74,16 @@ final class ChatViewModel: ObservableObject {
     }
     
     // Convenience initializer with default services
-    convenience init(conversationId: String?, otherUserId: String) {
+    convenience init(conversationId: String?, otherUserId: String, groupParticipants: [User]? = nil, groupName: String? = nil) {
         self.init(
             conversationId: conversationId,
             otherUserId: otherUserId,
             firestoreService: FirestoreService(),
             authService: AuthService.shared,
             networkMonitor: NetworkMonitor.shared,
-            offlineQueue: OfflineMessageQueue.shared
+            offlineQueue: OfflineMessageQueue.shared,
+            groupParticipants: groupParticipants,
+            groupName: groupName
         )
     }
     
@@ -356,9 +369,42 @@ final class ChatViewModel: ObservableObject {
                 // The mergeMessages() will replace optimistic message when Firestore confirms
                 logger.info("Message sent to Firestore successfully: \(messageId)")
                 
+            } else if let groupParticipants = pendingGroupParticipants {
+                // New group conversation - create group first, then send message
+                logger.info("Creating new group conversation with \(groupParticipants.count) participants")
+                
+                // Build participant ID list (include current user)
+                var participantIds = groupParticipants.map { $0.userId }
+                participantIds.append(currentUser.userId)
+                
+                // Create group conversation
+                let newConversationId = try await firestoreService.createGroupConversation(
+                    participants: participantIds,
+                    groupName: pendingGroupName
+                )
+                
+                // Update conversationId
+                conversationId = newConversationId
+                logger.info("New group conversation created: \(newConversationId)")
+                
+                // Clear pending group data (no longer needed)
+                pendingGroupParticipants = nil
+                pendingGroupName = nil
+                
+                // Send the first message
+                _ = try await firestoreService.sendMessage(
+                    conversationId: newConversationId,
+                    senderId: currentUser.userId,
+                    text: text,
+                    messageId: messageId
+                )
+                
+                // Start listening to messages
+                loadMessages()
+                
             } else {
-                // New conversation - create conversation with first message
-                logger.info("Creating new conversation with first message")
+                // New 1:1 conversation - create conversation with first message
+                logger.info("Creating new 1:1 conversation with first message")
                 let result = try await firestoreService.createConversationWithMessage(
                     participants: participants,
                     senderId: currentUser.userId,
@@ -478,22 +524,182 @@ final class ChatViewModel: ObservableObject {
     
     // MARK: - User Information
     
-    /// Load other user's display name for navigation title
+    /// Load conversation data and display name/title for navigation
     private func loadOtherUserDisplayName() {
         Task {
-            do {
-                let user = try await firestoreService.fetchUser(userId: otherUserId)
+            // Load conversation data if we have a conversationId
+            if let conversationId = conversationId {
+                await loadConversationData(conversationId: conversationId)
+            }
+            
+            // For pending groups (lazy creation), prefetch participant names
+            if let groupParticipants = pendingGroupParticipants {
+                await prefetchPendingGroupNames(participants: groupParticipants)
+            }
+            
+            // For group chats, use group display logic
+            if isGroupChat {
                 await MainActor.run {
-                    self.otherUserDisplayName = user.displayName
-                    self.logger.info("Loaded display name: \(user.displayName)")
+                    self.otherUserDisplayName = getGroupTitle()
                 }
-            } catch {
-                await MainActor.run {
-                    self.otherUserDisplayName = "Unknown User"
-                    self.logger.error("Failed to load other user display name: \(error.localizedDescription)")
+            } else {
+                // For 1:1 chats, load the other user's name
+                do {
+                    let user = try await firestoreService.fetchUser(userId: otherUserId)
+                    await MainActor.run {
+                        self.otherUserDisplayName = user.displayName
+                        self.senderNames[otherUserId] = user.displayName
+                        self.logger.info("Loaded display name: \(user.displayName)")
+                    }
+                } catch {
+                    await MainActor.run {
+                        self.otherUserDisplayName = "Unknown User"
+                        self.logger.error("Failed to load other user display name: \(error.localizedDescription)")
+                    }
                 }
             }
         }
+    }
+    
+    /// Prefetch names for pending group participants
+    private func prefetchPendingGroupNames(participants: [User]) async {
+        // Cache the display names from User objects
+        await MainActor.run {
+            for participant in participants {
+                self.senderNames[participant.userId] = participant.displayName
+            }
+            
+            // Update title now that we have names
+            if isGroupChat {
+                self.otherUserDisplayName = getGroupTitle()
+            }
+        }
+    }
+    
+    /// Load conversation data from Firestore
+    private func loadConversationData(conversationId: String) async {
+        do {
+            // Fetch conversation document
+            let conversation = try await firestoreService.getConversation(conversationId: conversationId)
+            
+            await MainActor.run {
+                self.conversation = conversation
+                self.logger.info("Loaded conversation data: isGroupChat=\(conversation.isGroupChat)")
+            }
+            
+            // Prefetch sender names for group chats
+            if conversation.isGroupChat {
+                await prefetchSenderNames(participants: conversation.participants)
+            }
+        } catch {
+            self.logger.error("Failed to load conversation data: \(error.localizedDescription)")
+        }
+    }
+    
+    /// Get formatted group title
+    private func getGroupTitle() -> String {
+        // Check for pending group name first (lazy creation)
+        if let pendingName = pendingGroupName, !pendingName.isEmpty {
+            return pendingName
+        }
+        
+        // Check for existing conversation
+        if let conversation = conversation {
+            // If group has a name, use it
+            if let groupName = conversation.groupName, !groupName.isEmpty {
+                return groupName
+            }
+            
+            // Otherwise, format participant names
+            guard let currentUserId = authService.currentUser?.userId else {
+                return "Group Chat"
+            }
+            
+            let otherParticipants = conversation.participants.filter { $0 != currentUserId }
+            let names = otherParticipants.compactMap { senderNames[$0] }
+            
+            if names.isEmpty {
+                return "Group Chat"
+            } else if names.count <= 3 {
+                return names.joined(separator: ", ")
+            } else {
+                let shown = names.prefix(2).joined(separator: ", ")
+                return "\(shown), +\(names.count - 2) more"
+            }
+        }
+        
+        // Pending group - format participant names
+        if let pendingParticipants = pendingGroupParticipants {
+            let names = pendingParticipants.compactMap { senderNames[$0.userId] }
+            
+            if names.isEmpty {
+                return "New Group"
+            } else if names.count <= 3 {
+                return names.joined(separator: ", ")
+            } else {
+                let shown = names.prefix(2).joined(separator: ", ")
+                return "\(shown), +\(names.count - 2) more"
+            }
+        }
+        
+        return "Group Chat"
+    }
+    
+    /// Prefetch sender names for all participants
+    private func prefetchSenderNames(participants: [String]) async {
+        guard let currentUserId = authService.currentUser?.userId else { return }
+        
+        // Filter out current user
+        let otherParticipants = participants.filter { $0 != currentUserId }
+        
+        for userId in otherParticipants {
+            // Skip if already cached
+            if senderNames[userId] != nil { continue }
+            
+            do {
+                let user = try await firestoreService.fetchUserProfile(userId: userId)
+                await MainActor.run {
+                    self.senderNames[userId] = user.displayName
+                    self.logger.info("Cached sender name: \(user.displayName) for userId: \(userId)")
+                }
+            } catch {
+                self.logger.error("Failed to fetch sender name for userId \(userId): \(error.localizedDescription)")
+                // Cache placeholder to avoid repeated failures
+                await MainActor.run {
+                    self.senderNames[userId] = "Unknown"
+                }
+            }
+        }
+        
+        // Update title after names are loaded
+        if isGroupChat {
+            await MainActor.run {
+                self.otherUserDisplayName = getGroupTitle()
+            }
+        }
+    }
+    
+    /// Get sender display name for a userId (used by MessageBubbleView)
+    func getSenderDisplayName(userId: String) -> String {
+        if let cached = senderNames[userId] {
+            return cached
+        }
+        
+        // Fetch in background
+        Task {
+            do {
+                let user = try await firestoreService.fetchUserProfile(userId: userId)
+                await MainActor.run {
+                    self.senderNames[userId] = user.displayName
+                    // Trigger UI update
+                    self.objectWillChange.send()
+                }
+            } catch {
+                self.logger.error("Failed to fetch sender name: \(error.localizedDescription)")
+            }
+        }
+        
+        return "Loading..."
     }
     
     // MARK: - Helper Methods

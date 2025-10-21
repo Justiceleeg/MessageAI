@@ -31,6 +31,9 @@ struct Conversation: Identifiable, Codable {
     /// Indicates if this is a group chat (more than 2 participants)
     let isGroupChat: Bool
     
+    /// Optional name for group chats
+    var groupName: String?
+    
     // MARK: - Coding Keys
     
     enum CodingKeys: String, CodingKey {
@@ -39,16 +42,18 @@ struct Conversation: Identifiable, Codable {
         case lastMessageText
         case lastMessageTimestamp
         case isGroupChat
+        case groupName
     }
     
     // MARK: - Initialization
     
-    init(conversationId: String, participants: [String], lastMessageText: String? = nil, lastMessageTimestamp: Date? = nil, isGroupChat: Bool = false) {
+    init(conversationId: String, participants: [String], lastMessageText: String? = nil, lastMessageTimestamp: Date? = nil, isGroupChat: Bool = false, groupName: String? = nil) {
         self.conversationId = conversationId
         self.participants = participants
         self.lastMessageText = lastMessageText
         self.lastMessageTimestamp = lastMessageTimestamp
         self.isGroupChat = isGroupChat
+        self.groupName = groupName
     }
     
     // MARK: - Helper Methods
@@ -75,6 +80,7 @@ struct Conversation: Identifiable, Codable {
         self.participants = participants
         self.lastMessageText = data["lastMessageText"] as? String
         self.isGroupChat = isGroupChat
+        self.groupName = data["groupName"] as? String
         
         // Handle timestamp conversion
         if let timestamp = data["lastMessageTimestamp"] as? Timestamp {
@@ -97,6 +103,10 @@ struct Conversation: Identifiable, Codable {
             data["lastMessageTimestamp"] = Timestamp(date: lastMessageTimestamp)
         }
         
+        if let groupName = groupName {
+            data["groupName"] = groupName
+        }
+        
         return data
     }
 }
@@ -109,7 +119,8 @@ extension Conversation: Hashable {
         lhs.lastMessageText == rhs.lastMessageText &&
         lhs.lastMessageTimestamp == rhs.lastMessageTimestamp &&
         lhs.participants == rhs.participants &&
-        lhs.isGroupChat == rhs.isGroupChat
+        lhs.isGroupChat == rhs.isGroupChat &&
+        lhs.groupName == rhs.groupName
     }
     
     func hash(into hasher: inout Hasher) {

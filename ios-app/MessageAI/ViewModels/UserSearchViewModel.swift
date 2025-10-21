@@ -135,6 +135,45 @@ final class UserSearchViewModel: ObservableObject {
         }
     }
     
+    /// Create a group conversation with selected users
+    /// - Parameters:
+    ///   - participants: Array of users to include in the group (excluding current user)
+    ///   - groupName: Optional name for the group
+    /// - Returns: The conversationId of the created group
+    func createGroupConversation(participants: [User], groupName: String?) async throws -> String {
+        guard let currentUserId = authService.currentUser?.userId else {
+            logger.error("Cannot create group: No authenticated user")
+            throw FirestoreError.userNotFound
+        }
+        
+        // Validate minimum participants (2 others + current user = 3 total)
+        guard participants.count >= 2 else {
+            logger.error("Cannot create group: Need at least 2 other participants")
+            throw UserSearchError.insufficientParticipants
+        }
+        
+        logger.info("Creating group chat with \(participants.count) participants")
+        
+        do {
+            // Extract participant IDs and add current user
+            var participantIds = participants.map { $0.userId }
+            participantIds.append(currentUserId)
+            
+            // Create the group conversation
+            let conversationId = try await firestoreService.createGroupConversation(
+                participants: participantIds,
+                groupName: groupName
+            )
+            
+            logger.info("Group conversation created: \(conversationId)")
+            return conversationId
+            
+        } catch {
+            logger.error("Failed to create group conversation: \(error.localizedDescription)")
+            throw error
+        }
+    }
+    
     // MARK: - Private Methods
     
     /// Set up search debouncing to avoid excessive queries
@@ -164,6 +203,7 @@ final class UserSearchViewModel: ObservableObject {
 enum UserSearchError: LocalizedError {
     case cannotMessageSelf
     case userNotFound
+    case insufficientParticipants
     
     var errorDescription: String? {
         switch self {
@@ -171,6 +211,8 @@ enum UserSearchError: LocalizedError {
             return "You cannot start a conversation with yourself."
         case .userNotFound:
             return "User not found."
+        case .insufficientParticipants:
+            return "Please select at least 2 other users to create a group chat."
         }
     }
 }

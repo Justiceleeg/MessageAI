@@ -502,6 +502,84 @@ class FirestoreService: ObservableObject {
             throw FirestoreError.writeFailed(error.localizedDescription)
         }
     }
+    
+    /// Create a new group conversation (Story 3.1)
+    /// - Parameters:
+    ///   - participants: Array of user IDs (must include 3+ users)
+    ///   - groupName: Optional name for the group
+    /// - Returns: The created conversation ID
+    /// - Throws: FirestoreError if the operation fails
+    func createGroupConversation(participants: [String], groupName: String?) async throws -> String {
+        logger.info("Creating group conversation with \(participants.count) participants")
+        
+        // Validate minimum participants for group chat
+        guard participants.count >= 3 else {
+            logger.error("Cannot create group conversation: Need at least 3 participants")
+            throw FirestoreError.invalidData
+        }
+        
+        let conversationId = UUID().uuidString
+        let timestamp = Date()
+        
+        do {
+            // Create conversation document
+            let conversationRef = db.collection("conversations").document(conversationId)
+            var conversationData: [String: Any] = [
+                "conversationId": conversationId,
+                "participants": participants,
+                "isGroupChat": true,
+                "createdAt": FieldValue.serverTimestamp()
+            ]
+            
+            // Add optional group name
+            if let groupName = groupName {
+                conversationData["groupName"] = groupName
+            }
+            
+            try await conversationRef.setData(conversationData)
+            
+            logger.info("Group conversation created successfully: \(conversationId)")
+            return conversationId
+            
+        } catch {
+            logger.error("Failed to create group conversation: \(error.localizedDescription)")
+            throw FirestoreError.writeFailed(error.localizedDescription)
+        }
+    }
+    
+    /// Fetch user profile for display name (Story 3.1)
+    /// Note: Consider implementing caching in the ViewModel layer to avoid repeated fetches
+    /// - Parameter userId: The user ID to fetch
+    /// - Returns: User model with profile information
+    /// - Throws: FirestoreError if the operation fails
+    func fetchUserProfile(userId: String) async throws -> User {
+        // Reuse existing getUserProfile method
+        return try await getUserProfile(userId: userId)
+    }
+    
+    /// Fetch a single conversation by ID (Story 3.1)
+    /// - Parameter conversationId: The conversation ID to fetch
+    /// - Returns: Conversation model if found
+    /// - Throws: FirestoreError if the operation fails
+    func getConversation(conversationId: String) async throws -> Conversation {
+        logger.info("Fetching conversation: \(conversationId)")
+        
+        do {
+            let document = try await db.collection("conversations").document(conversationId).getDocument()
+            
+            guard let conversation = Conversation(document: document) else {
+                logger.error("Failed to parse conversation document: \(conversationId)")
+                throw FirestoreError.invalidData
+            }
+            
+            logger.info("Conversation fetched successfully: \(conversationId)")
+            return conversation
+            
+        } catch {
+            logger.error("Failed to fetch conversation: \(error.localizedDescription)")
+            throw FirestoreError.readFailed(error.localizedDescription)
+        }
+    }
 }
 
 // MARK: - FirestoreError

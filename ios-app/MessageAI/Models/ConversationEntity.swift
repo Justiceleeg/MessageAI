@@ -29,18 +29,22 @@ final class ConversationEntity {
     /// Indicates if this is a group chat
     var isGroupChat: Bool
     
+    /// Optional name for group chats
+    var groupName: String?
+    
     /// Relationship to messages in this conversation
     @Relationship(deleteRule: .cascade, inverse: \MessageEntity.conversation)
     var messages: [MessageEntity]?
     
     // MARK: - Initialization
     
-    init(conversationId: String, participants: [String], lastMessageText: String? = nil, lastMessageTimestamp: Date? = nil, isGroupChat: Bool = false) {
+    init(conversationId: String, participants: [String], lastMessageText: String? = nil, lastMessageTimestamp: Date? = nil, isGroupChat: Bool = false, groupName: String? = nil) {
         self.conversationId = conversationId
         self.participants = participants
         self.lastMessageText = lastMessageText
         self.lastMessageTimestamp = lastMessageTimestamp
         self.isGroupChat = isGroupChat
+        self.groupName = groupName
     }
     
     // MARK: - Conversion Methods
@@ -52,7 +56,8 @@ final class ConversationEntity {
             participants: participants,
             lastMessageText: lastMessageText,
             lastMessageTimestamp: lastMessageTimestamp,
-            isGroupChat: isGroupChat
+            isGroupChat: isGroupChat,
+            groupName: groupName
         )
     }
     
@@ -63,7 +68,8 @@ final class ConversationEntity {
             participants: conversation.participants,
             lastMessageText: conversation.lastMessageText,
             lastMessageTimestamp: conversation.lastMessageTimestamp,
-            isGroupChat: conversation.isGroupChat
+            isGroupChat: conversation.isGroupChat,
+            groupName: conversation.groupName
         )
     }
     
@@ -73,6 +79,7 @@ final class ConversationEntity {
         self.lastMessageText = conversation.lastMessageText
         self.lastMessageTimestamp = conversation.lastMessageTimestamp
         self.isGroupChat = conversation.isGroupChat
+        self.groupName = conversation.groupName
     }
 }
 

@@ -16,8 +16,14 @@ struct ChatView: View {
     /// The conversation ID (optional for new conversations)
     let conversationId: String?
     
-    /// The other user's ID
+    /// The other user's ID (for 1:1 chats)
     let otherUserId: String
+    
+    /// Group participants (for group chats - lazy creation)
+    let groupParticipants: [User]?
+    
+    /// Group name (optional, for group chats)
+    let groupName: String?
     
     @StateObject private var viewModel: ChatViewModel
     @Environment(\.dismiss) private var dismiss
@@ -28,14 +34,18 @@ struct ChatView: View {
     
     // MARK: - Initialization
     
-    init(conversationId: String?, otherUserId: String) {
+    init(conversationId: String?, otherUserId: String, groupParticipants: [User]? = nil, groupName: String? = nil) {
         self.conversationId = conversationId
         self.otherUserId = otherUserId
+        self.groupParticipants = groupParticipants
+        self.groupName = groupName
         
         // Initialize ViewModel with parameters (uses convenience initializer)
         _viewModel = StateObject(wrappedValue: ChatViewModel(
             conversationId: conversationId,
-            otherUserId: otherUserId
+            otherUserId: otherUserId,
+            groupParticipants: groupParticipants,
+            groupName: groupName
         ))
     }
     
@@ -43,6 +53,8 @@ struct ChatView: View {
     init(conversationId: String?, otherUserId: String, viewModel: ChatViewModel) {
         self.conversationId = conversationId
         self.otherUserId = otherUserId
+        self.groupParticipants = nil
+        self.groupName = nil
         _viewModel = StateObject(wrappedValue: viewModel)
     }
     
@@ -114,7 +126,9 @@ struct ChatView: View {
                                     onRetry: message.status == "failed" ? {
                                         selectedMessageForRetry = message
                                         showRetryActionSheet = true
-                                    } : nil
+                                    } : nil,
+                                    isGroupChat: viewModel.conversation?.isGroupChat ?? false,
+                                    senderName: !viewModel.isSentByCurrentUser(message: message) ? viewModel.getSenderDisplayName(userId: message.senderId) : nil
                                 )
                                 .id(message.id)
                             }
