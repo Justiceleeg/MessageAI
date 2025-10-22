@@ -21,6 +21,8 @@ struct ConversationListView: View {
     @State private var showSettings: Bool = false
     @State private var showNewMessage: Bool = false
     @State private var showNewGroupChat: Bool = false
+    @State private var navigationPath = NavigationPath()
+    @State private var pendingNavigationConversationId: String?
     
     // Store service references for UserSearchView
     private let firestoreService: FirestoreService
@@ -41,7 +43,7 @@ struct ConversationListView: View {
     // MARK: - Body
     
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             ZStack {
                 if viewModel.isLoading && viewModel.conversations.isEmpty {
                     // Loading state
@@ -56,6 +58,20 @@ struct ConversationListView: View {
             }
             .navigationTitle("Messages")
             .navigationBarTitleDisplayMode(.large)
+            .navigationDestination(for: String.self) { conversationId in
+                // Navigate to conversation when tapped from notification (Story 3.4)
+                if let conversation = viewModel.conversations.first(where: { $0.conversationId == conversationId }) {
+                    let otherUserId = viewModel.getOtherParticipantId(for: conversation)
+                    ChatView(
+                        conversationId: conversationId,
+                        otherUserId: otherUserId
+                    )
+                } else {
+                    // Conversation not found in list, show error
+                    Text("Conversation not found")
+                        .foregroundStyle(.secondary)
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button(action: {
@@ -124,6 +140,13 @@ struct ConversationListView: View {
             }
             .onDisappear {
                 viewModel.onDisappear()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .navigateToConversation)) { notification in
+                // Handle navigation from notification tap (Story 3.4)
+                if let conversationId = notification.userInfo?["conversationId"] as? String {
+                    print("📱 ConversationListView: Navigating to conversation from notification: \(conversationId)")
+                    navigationPath.append(conversationId)
+                }
             }
         }
     }

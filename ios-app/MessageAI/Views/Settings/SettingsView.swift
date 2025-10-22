@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UserNotifications
 
 struct SettingsView: View {
     
@@ -17,6 +18,7 @@ struct SettingsView: View {
     // MARK: - State Properties
     
     @State private var showLogoutConfirmation: Bool = false
+    @State private var notificationPermissionStatus: UNAuthorizationStatus = .notDetermined
     @Environment(\.dismiss) private var dismiss
     
     // MARK: - Body
@@ -39,6 +41,43 @@ struct SettingsView: View {
                     .accessibilityLabel("Theme")
                     .accessibilityHint("Change the app's appearance")
                     .accessibilityValue(themeDisplayName(themeManager.currentTheme))
+                }
+                
+                // Notifications Section (Story 3.4)
+                Section {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Image(systemName: "bell.badge")
+                                .foregroundStyle(notificationStatusColor)
+                            Text("Notification Status")
+                            Spacer()
+                            Text(notificationStatusText)
+                                .foregroundStyle(.secondary)
+                                .font(.subheadline)
+                        }
+                        
+                        if notificationPermissionStatus == .denied {
+                            Text("Enable notifications in Settings to receive alerts when you receive new messages.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .padding(.top, 4)
+                            
+                            Button(action: openAppSettings) {
+                                Label("Open Settings", systemImage: "gear")
+                                    .font(.subheadline)
+                            }
+                            .buttonStyle(.bordered)
+                            .padding(.top, 4)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                } header: {
+                    Text("Notifications")
+                } footer: {
+                    if notificationPermissionStatus != .denied {
+                        Text("In-app banners will still show even if notifications are disabled.")
+                            .font(.caption)
+                    }
                 }
                 
                 // Account Section
@@ -82,6 +121,10 @@ struct SettingsView: View {
                 }
                 Button("Cancel", role: .cancel) {}
             }
+            .onAppear {
+                // Check notification permission status (Story 3.4)
+                checkNotificationPermissionStatus()
+            }
         }
     }
     
@@ -107,6 +150,54 @@ struct SettingsView: View {
             return "Light"
         case .dark:
             return "Dark"
+        }
+    }
+    
+    /// Check the current notification permission status (Story 3.4)
+    private func checkNotificationPermissionStatus() {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            DispatchQueue.main.async {
+                notificationPermissionStatus = settings.authorizationStatus
+            }
+        }
+    }
+    
+    /// Get the notification status text based on permission status (Story 3.4)
+    private var notificationStatusText: String {
+        switch notificationPermissionStatus {
+        case .authorized:
+            return "Enabled"
+        case .denied:
+            return "Disabled"
+        case .notDetermined:
+            return "Not Set"
+        case .provisional:
+            return "Provisional"
+        case .ephemeral:
+            return "Ephemeral"
+        @unknown default:
+            return "Unknown"
+        }
+    }
+    
+    /// Get the color for notification status indicator (Story 3.4)
+    private var notificationStatusColor: Color {
+        switch notificationPermissionStatus {
+        case .authorized:
+            return .green
+        case .denied:
+            return .red
+        case .notDetermined:
+            return .orange
+        default:
+            return .gray
+        }
+    }
+    
+    /// Open iOS Settings app to notification settings (Story 3.4)
+    private func openAppSettings() {
+        if let url = URL(string: UIApplication.openSettingsURLString) {
+            UIApplication.shared.open(url)
         }
     }
 }

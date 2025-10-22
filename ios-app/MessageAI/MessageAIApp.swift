@@ -42,6 +42,9 @@ struct message_aiApp: App {
     // Theme manager shared across the app
     @StateObject private var themeManager = ThemeManager()
     
+    // Notification manager for notification system (Story 3.4)
+    @State private var notificationManager = NotificationManager()
+    
     // Track scene phase for app lifecycle (Story 3.3)
     @Environment(\.scenePhase) private var scenePhase
     
@@ -54,7 +57,26 @@ struct message_aiApp: App {
             RootView()
                 .environmentObject(authViewModel)
                 .environmentObject(themeManager)
+                .environment(notificationManager)
                 .preferredColorScheme(themeManager.preferredColorScheme)
+                .overlay(alignment: .top) {
+                    // In-app notification banner (Story 3.4)
+                    if notificationManager.showBanner,
+                       let title = notificationManager.bannerTitle,
+                       let message = notificationManager.bannerMessage {
+                        NotificationBannerView(
+                            title: title,
+                            message: message,
+                            onTap: {
+                                handleBannerTap()
+                            },
+                            onDismiss: {
+                                notificationManager.dismissBanner()
+                            }
+                        )
+                        .animation(.spring(), value: notificationManager.showBanner)
+                    }
+                }
         }
         .modelContainer(PersistenceController.shared.modelContainer)
         .onChange(of: scenePhase) { oldPhase, newPhase in
@@ -62,7 +84,7 @@ struct message_aiApp: App {
         }
     }
     
-    // MARK: - App Lifecycle Management (Story 3.3)
+    // MARK: - App Lifecycle Management (Story 3.3, 3.4)
     
     /// Handle app lifecycle transitions for presence management
     private func handleScenePhaseChange(oldPhase: ScenePhase, newPhase: ScenePhase) {
@@ -87,6 +109,25 @@ struct message_aiApp: App {
             break
         }
     }
+    
+    // MARK: - Notification Handling (Story 3.4)
+    
+    /// Handle banner tap to navigate to conversation
+    private func handleBannerTap() {
+        if let conversationId = notificationManager.bannerConversationId {
+            print("📱 Banner tapped - navigating to conversation: \(conversationId)")
+            
+            // Post notification for navigation
+            NotificationCenter.default.post(
+                name: .navigateToConversation,
+                object: nil,
+                userInfo: ["conversationId": conversationId]
+            )
+            
+            // Dismiss banner
+            notificationManager.dismissBanner()
+        }
+    }
 }
 
 // MARK: - Root View
@@ -94,6 +135,7 @@ struct message_aiApp: App {
 /// Root view that handles authentication-based routing
 struct RootView: View {
     @EnvironmentObject var authViewModel: AuthViewModel
+    @Environment(NotificationManager.self) private var notificationManager
     
     // Presence service for setting user online on authentication (Story 3.3)
     private let presenceService = PresenceService()
@@ -110,7 +152,17 @@ struct RootView: View {
                     if let userId = authViewModel.authService.currentUser?.userId {
                         print("📱 User authenticated - setting presence online immediately")
                         presenceService.goOnline(userId: userId, immediate: true)
+                        
+                        // Request notification permissions and start listening (Story 3.4)
+                        Task {
+                            _ = await notificationManager.requestNotificationPermissions()
+                            notificationManager.startListening(userId: userId)
+                        }
                     }
+                }
+                .onDisappear {
+                    // Stop notification listener when logged out (Story 3.4)
+                    notificationManager.stopListening()
                 }
             } else {
                 LoginView()

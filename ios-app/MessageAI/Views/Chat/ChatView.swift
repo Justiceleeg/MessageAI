@@ -27,6 +27,7 @@ struct ChatView: View {
     
     @StateObject private var viewModel: ChatViewModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(NotificationManager.self) private var notificationManager
     
     // State for retry action sheet
     @State private var showRetryActionSheet = false
@@ -98,9 +99,17 @@ struct ChatView: View {
         }
         .onAppear {
             viewModel.onAppear()
+            
+            // Set currently viewed conversation for notification suppression (Story 3.4)
+            if let conversationId = conversationId {
+                notificationManager.currentlyViewedConversationId = conversationId
+            }
         }
         .onDisappear {
             viewModel.onDisappear()
+            
+            // Clear currently viewed conversation (Story 3.4)
+            notificationManager.currentlyViewedConversationId = nil
         }
         .alert("Error", isPresented: .constant(viewModel.errorMessage != nil)) {
             Button("OK") {
