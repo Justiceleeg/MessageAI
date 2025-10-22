@@ -35,13 +35,16 @@
 - The app automatically sets the user's status to online when active and offline when backgrounded/disconnected.
 - Presence uses Firebase Realtime Database with automatic disconnect detection for reliability.
 
-## Story 3.4: Implement Push Notifications
+## Story 3.4: Implement Notification System (Mock Push for Demo)
 
-**As a** user, **I want to** receive push notifications for new messages when I'm not viewing a conversation, **so that** I don't miss important communications.
+**As a** user, **I want to** receive notifications for new messages when I'm not viewing a conversation, **so that** I don't miss important communications.
 
 **Acceptance Criteria**
-- When a new message is received for a conversation the user is not currently viewing, a push notification is delivered to the device (FR8).
-- Notifications work reliably when the app is in the foreground (MVP scope).
+- When a new message is received for a conversation the user is not currently viewing, a notification is delivered to the device (FR8).
+- Notifications work reliably when the app is in the foreground via in-app banner (MVP scope).
+- Notifications work when app is in background via local notifications (iOS native).
 - Tapping a notification navigates the user to the relevant conversation.
-- A Firebase Cloud Function is implemented and deployed to trigger FCM notifications based on new messages in Firestore.
-- FCM device tokens are properly registered, refreshed, and synced to Firestore.
+- Notifications are suppressed when user is actively viewing that conversation.
+- A NotificationManager service coordinates all notification logic using Firestore listeners.
+
+**Note:** This story implements a mock notification system using local notifications and in-app banners for demo purposes. Can be upgraded to production FCM push in a future story when Apple Developer account and Firebase billing are available.
