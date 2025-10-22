@@ -32,7 +32,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
 }
 
 @main
-struct message_aiApp: App {
+struct MessageAIApp: App {
     // Register app delegate for Firebase setup
     @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
 

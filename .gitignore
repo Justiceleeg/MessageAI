@@ -1,2 +1,12 @@
+# Xcode user data
 xcuserdata/
 *.xcuserstate
+
+# Firebase Security Rules (keep private)
+firebase/firestore.rules
+firebase/database.rules.json
+
+# Note: GoogleService-Info.plist contains Firebase API key
+# This is intentionally committed for the next 5 days while repo is public
+# Will be made private before production deployment
+# ios-app/MessageAI/GoogleService-Info.plist
