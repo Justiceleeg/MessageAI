@@ -16,28 +16,40 @@ struct MessageBubbleView: View {
     let onRetry: (() -> Void)?
     let isGroupChat: Bool
     let senderName: String?
+    let isOnline: Bool?  // Presence indicator for group chat sender (Story 3.3)
     
     // MARK: - Initialization
     
-    init(message: Message, isSentByCurrentUser: Bool, status: String = "", onRetry: (() -> Void)? = nil, isGroupChat: Bool = false, senderName: String? = nil) {
+    init(message: Message, isSentByCurrentUser: Bool, status: String = "", onRetry: (() -> Void)? = nil, isGroupChat: Bool = false, senderName: String? = nil, isOnline: Bool? = nil) {
         self.message = message
         self.isSentByCurrentUser = isSentByCurrentUser
         self.status = status.isEmpty ? message.status : status
         self.onRetry = onRetry
         self.isGroupChat = isGroupChat
         self.senderName = senderName
+        self.isOnline = isOnline
     }
     
     // MARK: - Body
     
     var body: some View {
         VStack(alignment: isSentByCurrentUser ? .trailing : .leading, spacing: 4) {
-            // Sender name (only for received messages in group chats)
+            // Sender name with presence indicator (only for received messages in group chats)
             if !isSentByCurrentUser && isGroupChat, let senderName = senderName {
-                Text(senderName)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.secondary)
-                    .padding(.leading, 12)
+                HStack(spacing: 4) {
+                    Text(senderName)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.secondary)
+                    
+                    // Green dot if sender is online (Story 3.3)
+                    if let isOnline = isOnline, isOnline {
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 6, height: 6)
+                            .accessibilityLabel("User is online")
+                    }
+                }
+                .padding(.leading, 12)
             }
             
             // Message bubble

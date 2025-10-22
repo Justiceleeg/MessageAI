@@ -8,6 +8,7 @@
 import Foundation
 import Combine
 import FirebaseAuth
+import FirebaseDatabase
 import OSLog
 import SwiftData
 
@@ -26,15 +27,25 @@ final class ConversationListViewModel: ObservableObject {
     /// Error message for display to user
     @Published var errorMessage: String?
     
+    /// Map of user presence status (userId → isOnline)
+    @Published var userPresenceMap: [String: Bool] = [:]
+    
+    /// Map of user last seen timestamps (userId → lastSeen Date)
+    @Published var userLastSeenMap: [String: Date] = [:]
+    
     // MARK: - Private Properties
     
     private let firestoreService: FirestoreService
     private let authService: AuthService
+    private let presenceService = PresenceService()
     private var modelContext: ModelContext?
     private let logger = Logger(subsystem: "com.jpw.message-ai", category: "ConversationListViewModel")
     
     /// In-memory cache for user display names to avoid repeated fetches
     private var userCache: [String: User] = [:]
+    
+    /// Active presence listeners (userId → DatabaseHandle) for visible conversation rows
+    nonisolated(unsafe) private var activePresenceListeners: [String: DatabaseHandle] = [:]
     
     /// Task for managing the conversation listener
     nonisolated(unsafe) private var listenerTask: Task<Void, Never>?
@@ -296,11 +307,71 @@ final class ConversationListViewModel: ObservableObject {
         }
     }
     
+    // MARK: - Presence Tracking
+    
+    /// Start listening to presence for a specific user (called when conversation row appears)
+    /// Only tracks presence for 1:1 conversations (not groups)
+    func startPresenceListener(for userId: String) {
+        // Skip if already listening
+        guard activePresenceListeners[userId] == nil else {
+            logger.debug("Already listening to presence for user \(userId)")
+            return
+        }
+        
+        logger.info("Starting presence listener for user \(userId)")
+        
+        let handle = presenceService.observePresence(userId: userId) { [weak self] isOnline, lastSeen in
+            Task { @MainActor [weak self] in
+                self?.userPresenceMap[userId] = isOnline
+                self?.userLastSeenMap[userId] = lastSeen
+                self?.logger.debug("Presence updated: \(userId) is \(isOnline ? "online" : "offline")")
+            }
+        }
+        
+        activePresenceListeners[userId] = handle
+    }
+    
+    /// Stop listening to presence for a specific user (called when conversation row disappears)
+    func stopPresenceListener(for userId: String) {
+        guard let handle = activePresenceListeners[userId] else {
+            return
+        }
+        
+        logger.info("Stopping presence listener for user \(userId)")
+        
+        presenceService.stopObservingPresence(userId: userId, handle: handle)
+        activePresenceListeners.removeValue(forKey: userId)
+        userPresenceMap.removeValue(forKey: userId)
+        userLastSeenMap.removeValue(forKey: userId)
+    }
+    
+    /// Stop all presence listeners (cleanup)
+    private func stopAllPresenceListeners() {
+        logger.info("Stopping all presence listeners (\(self.activePresenceListeners.count) active)")
+        
+        for (userId, handle) in activePresenceListeners {
+            presenceService.stopObservingPresence(userId: userId, handle: handle)
+        }
+        
+        activePresenceListeners.removeAll()
+        userPresenceMap.removeAll()
+        userLastSeenMap.removeAll()
+    }
+    
     // MARK: - Cleanup
     
     deinit {
         // Cancel the listener task on cleanup
         listenerTask?.cancel()
+        
+        // Stop all presence listeners (direct Firebase RTDB cleanup)
+        for (userId, handle) in activePresenceListeners {
+            Database.database().reference()
+                .child("users")
+                .child(userId)
+                .child("presence")
+                .removeObserver(withHandle: handle)
+        }
     }
 }
 

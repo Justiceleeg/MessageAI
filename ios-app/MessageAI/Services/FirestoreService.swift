@@ -526,7 +526,6 @@ class FirestoreService: ObservableObject {
         }
         
         let conversationId = UUID().uuidString
-        let timestamp = Date()
         
         do {
             // Create conversation document

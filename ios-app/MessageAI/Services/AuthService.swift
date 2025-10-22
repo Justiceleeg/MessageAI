@@ -148,9 +148,11 @@ class AuthService: ObservableObject {
     /// - Throws: AuthError if sign out fails
     func signOut() async throws {
         do {
-            // Update presence to offline before signing out
+            // Update presence to offline in Realtime Database before signing out (Story 3.3)
             if let userId = currentUser?.userId {
-                try? await getFirestoreService().updateUserPresence(userId: userId, presence: .offline)
+                logger.info("Setting user offline before sign out")
+                let presenceService = PresenceService()
+                presenceService.goOffline(userId: userId)
             }
             
             try Auth.auth().signOut()

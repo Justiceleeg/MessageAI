@@ -78,6 +78,24 @@ struct ChatView: View {
         }
         .navigationTitle(viewModel.otherUserDisplayName.isEmpty ? "Chat" : viewModel.otherUserDisplayName)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            // Presence subtitle for 1:1 chats (Story 3.3)
+            ToolbarItem(placement: .principal) {
+                VStack(spacing: 2) {
+                    Text(viewModel.otherUserDisplayName.isEmpty ? "Chat" : viewModel.otherUserDisplayName)
+                        .font(.headline)
+                    
+                    // Show presence subtitle only for 1:1 chats
+                    if !viewModel.isGroupChat {
+                        Text(viewModel.formatLastSeen(userId: otherUserId))
+                            .font(.caption)
+                            .foregroundColor(viewModel.participantPresence[otherUserId] == true ? .green : .gray)
+                            .animation(.easeInOut(duration: 0.3), value: viewModel.participantPresence[otherUserId])
+                            .accessibilityLabel(viewModel.formatLastSeen(userId: otherUserId))
+                    }
+                }
+            }
+        }
         .onAppear {
             viewModel.onAppear()
         }
@@ -129,7 +147,8 @@ struct ChatView: View {
                                         showRetryActionSheet = true
                                     } : nil,
                                     isGroupChat: viewModel.conversation?.isGroupChat ?? false,
-                                    senderName: !viewModel.isSentByCurrentUser(message: message) ? viewModel.getSenderDisplayName(userId: message.senderId) : nil
+                                    senderName: !viewModel.isSentByCurrentUser(message: message) ? viewModel.getSenderDisplayName(userId: message.senderId) : nil,
+                                    isOnline: viewModel.participantPresence[message.senderId]  // Story 3.3: Show online status in group chats
                                 )
                                 .id(message.id)
                                 .onAppear {

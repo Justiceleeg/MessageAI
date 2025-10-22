@@ -9,6 +9,7 @@ import Foundation
 import SwiftUI
 import SwiftData
 import Combine
+import FirebaseDatabase
 import OSLog
 
 /// ViewModel for managing chat screen state and message operations
@@ -26,6 +27,10 @@ final class ChatViewModel: ObservableObject {
     @Published var otherUserDisplayName: String = ""
     @Published var senderNames: [String: String] = [:] // Cache for sender display names (userId -> displayName)
     
+    // Presence tracking (Story 3.3)
+    @Published var participantPresence: [String: Bool] = [:]  // userId -> isOnline
+    @Published var participantLastSeen: [String: Date] = [:]  // userId -> lastSeen Date
+    
     // MARK: - Private Properties
     
     private let otherUserId: String
@@ -34,9 +39,13 @@ final class ChatViewModel: ObservableObject {
     private let modelContext: ModelContext
     private let networkMonitor: NetworkMonitor
     private let offlineQueue: OfflineMessageQueue
+    private let presenceService = PresenceService()  // Story 3.3
     private let logger = Logger(subsystem: "com.jpw.message-ai", category: "ChatViewModel")
     private var messageListenerTask: Task<Void, Never>?
     private var networkObserverTask: Task<Void, Never>?
+    
+    // Presence tracking (Story 3.3)
+    private var activePresenceListeners: [String: DatabaseHandle] = [:]  // userId -> DatabaseHandle
     
     // Group chat properties (Story 3.1)
     @Published var conversation: Conversation? // Made public for View access and read receipt tracking
@@ -109,7 +118,12 @@ final class ChatViewModel: ObservableObject {
                 await loadConversationData()
                 // Mark messages as delivered AFTER conversation loads (Story 3.2)
                 await markMessagesAsDeliveredAsync()
+                // Start presence listening after conversation is loaded (Story 3.3)
+                startPresenceListening()
             }
+        } else {
+            // For new conversations, start presence listening immediately (Story 3.3)
+            startPresenceListening()
         }
     }
     
@@ -118,6 +132,7 @@ final class ChatViewModel: ObservableObject {
         logger.info("ChatView disappeared")
         stopListeningToMessages()
         stopNetworkObserver()
+        stopPresenceListening()  // Story 3.3
     }
     
     // MARK: - Network Monitoring
@@ -1054,6 +1069,91 @@ final class ChatViewModel: ObservableObject {
             
         } catch {
             logger.error("Failed to load conversation data: \(error.localizedDescription)")
+        }
+    }
+    
+    // MARK: - Presence Tracking (Story 3.3)
+    
+    /// Start listening to presence for all participants
+    func startPresenceListening() {
+        guard let currentUserId = authService.currentUser?.userId else {
+            logger.warning("Cannot start presence listening: No authenticated user")
+            return
+        }
+        
+        // For 1:1 chats: listen to other user only
+        // For group chats: listen to all participants
+        let participantsToTrack: [String]
+        if isGroupChat, let conversation = conversation {
+            // Group chat: track all participants except current user
+            participantsToTrack = conversation.participants.filter { $0 != currentUserId }
+        } else {
+            // 1:1 chat: track the other user only
+            participantsToTrack = [otherUserId]
+        }
+        
+        logger.info("Starting presence listeners for \(participantsToTrack.count) participants")
+        
+        for userId in participantsToTrack {
+            // Skip if already listening
+            guard activePresenceListeners[userId] == nil else {
+                logger.debug("Already listening to presence for user \(userId)")
+                continue
+            }
+            
+            let handle = presenceService.observePresence(userId: userId) { [weak self] isOnline, lastSeen in
+                Task { @MainActor [weak self] in
+                    self?.participantPresence[userId] = isOnline
+                    self?.participantLastSeen[userId] = lastSeen
+                    self?.logger.debug("Presence updated: \(userId) is \(isOnline ? "online" : "offline")")
+                }
+            }
+            
+            activePresenceListeners[userId] = handle
+        }
+    }
+    
+    /// Stop all presence listeners (cleanup)
+    func stopPresenceListening() {
+        logger.info("Stopping all presence listeners (\(self.activePresenceListeners.count) active)")
+        
+        for (userId, handle) in activePresenceListeners {
+            presenceService.stopObservingPresence(userId: userId, handle: handle)
+        }
+        
+        activePresenceListeners.removeAll()
+        participantPresence.removeAll()
+        participantLastSeen.removeAll()
+    }
+    
+    /// Format last seen date into human-readable string
+    /// Returns "Online", "Last seen 5m ago", "Last seen 2h ago", "Last seen yesterday"
+    func formatLastSeen(userId: String) -> String {
+        // Check if user is online
+        if participantPresence[userId] == true {
+            return "Online"
+        }
+        
+        // Get last seen date
+        guard let lastSeen = participantLastSeen[userId] else {
+            return "Offline"
+        }
+        
+        let interval = Date().timeIntervalSince(lastSeen)
+        
+        if interval < 60 {
+            return "Last seen just now"
+        } else if interval < 3600 {
+            let minutes = Int(interval / 60)
+            return "Last seen \(minutes)m ago"
+        } else if interval < 86400 {
+            let hours = Int(interval / 3600)
+            return "Last seen \(hours)h ago"
+        } else if interval < 172800 {  // Less than 2 days
+            return "Last seen yesterday"
+        } else {
+            let days = Int(interval / 86400)
+            return "Last seen \(days)d ago"
         }
     }
 }

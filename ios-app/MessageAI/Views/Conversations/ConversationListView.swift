@@ -168,14 +168,42 @@ struct ConversationListView: View {
                 ConversationRow(
                     conversation: conversation,
                     displayName: viewModel.getOtherParticipantName(for: conversation),
-                    currentUserId: authViewModel.authService.currentUser?.userId ?? ""
+                    currentUserId: authViewModel.authService.currentUser?.userId ?? "",
+                    isOnline: getPresenceStatus(for: conversation)
                 )
             }
             .listRowSeparator(.visible)
             .accessibilityLabel(conversationAccessibilityLabel(for: conversation))
             .accessibilityHint("Tap to open conversation")
+            .onAppear {
+                // Start presence listener when row becomes visible (1:1 only)
+                if !conversation.isGroupChat {
+                    let otherUserId = viewModel.getOtherParticipantId(for: conversation)
+                    if !otherUserId.isEmpty {
+                        viewModel.startPresenceListener(for: otherUserId)
+                    }
+                }
+            }
+            .onDisappear {
+                // Stop presence listener when row disappears (1:1 only)
+                if !conversation.isGroupChat {
+                    let otherUserId = viewModel.getOtherParticipantId(for: conversation)
+                    if !otherUserId.isEmpty {
+                        viewModel.stopPresenceListener(for: otherUserId)
+                    }
+                }
+            }
         }
         .listStyle(.plain)
+    }
+    
+    /// Get presence status for a conversation (nil for groups or not loaded)
+    private func getPresenceStatus(for conversation: Conversation) -> Bool? {
+        // Only show presence for 1:1 conversations
+        guard !conversation.isGroupChat else { return nil }
+        
+        let otherUserId = viewModel.getOtherParticipantId(for: conversation)
+        return viewModel.userPresenceMap[otherUserId]
     }
     
     /// Generate chat destination for navigation
@@ -203,11 +231,12 @@ struct ConversationRow: View {
     let conversation: Conversation
     let displayName: String
     let currentUserId: String
+    let isOnline: Bool?  // Optional: nil for group chats or when not loaded
     
     var body: some View {
         HStack(spacing: 12) {
-            // Avatar (group icon for groups, initials for 1:1)
-            avatar
+            // Avatar with presence indicator (group icon for groups, initials for 1:1)
+            avatarWithPresence
             
             // Content
             VStack(alignment: .leading, spacing: 4) {
@@ -251,24 +280,42 @@ struct ConversationRow: View {
         .padding(.vertical, 8)
     }
     
-    /// Avatar circle with initials or group icon
-    private var avatar: some View {
-        Circle()
-            .fill(avatarColor)
-            .frame(width: 50, height: 50)
-            .overlay(
-                Group {
-                    if conversation.isGroupChat {
-                        Image(systemName: "person.3.fill")
-                            .font(.system(size: 24, weight: .bold))
-                            .foregroundStyle(.white)
-                    } else {
-                        Text(avatarInitials)
-                            .font(.system(size: 20, weight: .bold))
-                            .foregroundStyle(.white)
+    /// Avatar circle with initials or group icon, plus presence indicator
+    private var avatarWithPresence: some View {
+        ZStack(alignment: .bottomTrailing) {
+            // Main avatar circle
+            Circle()
+                .fill(avatarColor)
+                .frame(width: 50, height: 50)
+                .overlay(
+                    Group {
+                        if conversation.isGroupChat {
+                            Image(systemName: "person.3.fill")
+                                .font(.system(size: 24, weight: .bold))
+                                .foregroundStyle(.white)
+                        } else {
+                            Text(avatarInitials)
+                                .font(.system(size: 20, weight: .bold))
+                                .foregroundStyle(.white)
+                        }
                     }
-                }
-            )
+                )
+            
+            // Presence indicator (only for 1:1 chats with presence data)
+            if !conversation.isGroupChat, let isOnline = isOnline {
+                Circle()
+                    .fill(isOnline ? Color.green : Color.gray)
+                    .frame(width: 12, height: 12)
+                    .overlay(
+                        Circle()
+                            .stroke(Color.white, lineWidth: 2)
+                    )
+                    .offset(x: -2, y: -2)  // Position at bottom-right
+                    .accessibilityLabel(isOnline ? "User is online" : "User is offline")
+                    .transition(.opacity)
+                    .animation(.easeInOut(duration: 0.3), value: isOnline)
+            }
+        }
     }
     
     /// Get initials from display name
