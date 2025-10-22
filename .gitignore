@@ -10,3 +10,5 @@ firebase/database.rules.json
 # This is intentionally committed for the next 5 days while repo is public
 # Will be made private before production deployment
 # ios-app/MessageAI/GoogleService-Info.plist
+
+.vscode/
