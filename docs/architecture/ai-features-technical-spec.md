@@ -13,9 +13,10 @@ This document specifies the technical architecture for implementing 6 AI-powered
 
 **Key Architectural Decisions:**
 - Python backend with FastAPI for AI services
-- LangChain framework for LLM orchestration
+- LangChain framework for LLM orchestration and vector operations
 - Pinecone for vector storage and semantic search
 - OpenAI GPT-4o-mini for chat, text-embedding-3-small for embeddings
+- Lightweight RAG for decision detection (vector search + context)
 - Hybrid storage: Events in Firestore, Reminders/Decisions in Pinecone + Firestore
 
 ---
@@ -41,7 +42,6 @@ This document specifies the technical architecture for implementing 6 AI-powered
 │                                                             │
 │  API Layer (FastAPI)                                        │
 │  ├─ POST /api/v1/analyze-message                           │
-│  ├─ POST /api/v1/summarize-thread                          │
 │  ├─ POST /api/v1/events/search                             │
 │  ├─ POST /api/v1/reminders (create, list, search)          │
 │  ├─ POST /api/v1/decisions (create, list, search)          │
@@ -49,7 +49,7 @@ This document specifies the technical architecture for implementing 6 AI-powered
 │                                                             │
 │  Service Layer                                              │
 │  ├─ VectorStoreService (Pinecone + LangChain)              │
-│  ├─ RAGService (RetrievalQA chains)                        │
+│  ├─ OpenAIService (Chat completions + embeddings)          │
 │  ├─ AgentService (LangChain agents + tools)                │
 │  └─ FirebaseService (optional Firestore access)            │
 └─────────────────────────────────────────────────────────────┘
@@ -85,20 +85,19 @@ Python backend:
 iOS displays AI prompts below message
 ```
 
-#### RAG Summarization Flow
+#### Decision Detection with Lightweight RAG Flow
 ```
-User long-presses conversation → "Summarize Unread"
-    ↓
-iOS calls POST /summarize-thread with unread messages
+User sends message → iOS calls POST /analyze-message
     ↓
 Python backend:
-  1. Combine unread message text
-  2. Generate query embedding
-  3. Vector search Pinecone for similar historical messages
-  4. Create RAG chain with LangChain
-  5. Generate 3 summaries (brief, medium, detailed)
+  1. Search Pinecone for recent messages in conversation (k=5)
+  2. Build context from retrieved messages
+  3. Call GPT-4o-mini with context + current message
+  4. AI extracts decision using full conversation context
+  5. Generate embedding for message
+  6. Store message in Pinecone
     ↓
-iOS displays summary in chat view
+iOS displays decision prompt with contextual summary
 ```
 
 #### Event Deduplication Flow
@@ -221,52 +220,26 @@ Response:
 }
 ```
 
-#### 2. Summarize Thread (RAG)
+#### 2. Search Decisions
 ```http
-POST /summarize-thread
-Content-Type: application/json
-
-Request:
-{
-  "conversation_id": "conv_123",
-  "unread_messages": [
-    {
-      "id": "msg1",
-      "text": "Hey, can you help?",
-      "sender_id": "user_789",
-      "timestamp": "2025-10-22T14:30:00Z"
-    }
-  ],
-  "verbosity": "medium"
-}
-
-Response:
-{
-  "brief": "• User asked for help\n• Mentioned urgent deadline\n• Needs document review",
-  "medium": "User requested help with an urgent deadline. They need the Q3 report reviewed by tomorrow.",
-  "detailed": "User reached out asking for assistance with the Q3 report that was mentioned in previous conversation. They have an urgent deadline tomorrow and specifically need help reviewing the financial analysis section.",
-  "context_messages_used": ["msg_old1", "msg_old2"]
-}
-```
-
-#### 3. Search Similar Events
-```http
-GET /events/search?user_id=user_456&query=birthday%20party&k=3
+GET /decisions/search?user_id=user_456&query=restaurant&conversation_id=conv_123
 
 Response:
 {
   "results": [
     {
-      "event_id": "evt_123",
-      "title": "David's Birthday Party",
-      "date": "2025-10-27",
-      "similarity": 0.92
+      "id": "dec_001",
+      "text": "Going to Italian restaurant for dinner",
+      "conversation_id": "conv_123",
+      "source_message_id": "msg_999",
+      "timestamp": "2025-10-22T18:00:00Z",
+      "similarity": 0.88
     }
   ]
 }
 ```
 
-#### 4. Create Reminder
+#### 3. Create Reminder
 ```http
 POST /reminders
 Content-Type: application/json
@@ -291,7 +264,7 @@ Response:
 }
 ```
 
-#### 5. List Reminders
+#### 4. List Reminders
 ```http
 GET /reminders?user_id=user_456&conversation_id=conv_123
 
@@ -310,7 +283,7 @@ Response:
 }
 ```
 
-#### 6. Create Decision
+#### 5. Create Decision
 ```http
 POST /decisions
 Content-Type: application/json
@@ -333,7 +306,7 @@ Response:
 }
 ```
 
-#### 7. Search Decisions
+#### 6. Search Decisions
 ```http
 GET /decisions/search?user_id=user_456&query=restaurant&conversation_id=conv_123
 
@@ -352,7 +325,7 @@ Response:
 }
 ```
 
-#### 8. Proactive Assistant (LangChain Agent)
+#### 7. Proactive Assistant (LangChain Agent)
 ```http
 POST /proactive-assist
 Content-Type: application/json
@@ -538,18 +511,32 @@ vector_store = PineconeVectorStore(
 )
 ```
 
-#### 3. RAG Chain
+#### 3. Lightweight RAG for Decision Detection
 ```python
 from langchain_openai import ChatOpenAI
-from langchain.chains import RetrievalQA
 
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
-
-qa_chain = RetrievalQA.from_chain_type(
-    llm=llm,
-    chain_type="stuff",
-    retriever=vector_store.as_retriever(search_kwargs={"k": 5})
+# Step 1: Retrieve recent context
+recent_messages = vector_store.similarity_search(
+    query=current_message,
+    k=5,
+    filter={"conversation_id": conversation_id}
 )
+
+# Step 2: Build context string
+context = "\n".join([msg.page_content for msg in recent_messages])
+
+# Step 3: Call LLM with context
+llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
+prompt = f"""
+Previous conversation:
+{context}
+
+Current message: "{current_message}"
+
+Analyze for decisions. Use context to create complete statement.
+"""
+
+response = llm.invoke(prompt)
 ```
 
 #### 4. Agent with Tools
@@ -599,7 +586,6 @@ MessageAI/
 │   │   ├── routes/                   # API endpoints
 │   │   │   ├── __init__.py
 │   │   │   ├── analysis.py           # Message analysis
-│   │   │   ├── summarization.py      # RAG summarization
 │   │   │   ├── events.py             # Event search
 │   │   │   ├── reminders.py          # Reminder CRUD
 │   │   │   ├── decisions.py          # Decision CRUD
@@ -608,9 +594,8 @@ MessageAI/
 │   │   ├── services/                 # Business logic
 │   │   │   ├── __init__.py
 │   │   │   ├── vector_store.py       # Pinecone + LangChain
-│   │   │   ├── rag_service.py        # RAG chains
-│   │   │   ├── agent_service.py      # LangChain agents
 │   │   │   ├── openai_service.py     # OpenAI API wrapper
+│   │   │   ├── agent_service.py      # LangChain agents
 │   │   │   └── firebase_service.py   # Optional Firestore
 │   │   │
 │   │   ├── models/                   # Data models
@@ -871,24 +856,7 @@ logger.error("OpenAI API failed", exc_info=True)
 
 ---
 
-### Phase 3: RAG Summarization (Day 2)
-**Goal:** Thread summarization with RAG working
-
-**Tasks:**
-1. Implement `RAGService` with LangChain chains
-2. Create `/summarize-thread` endpoint
-3. Test with sample conversation
-4. Update iOS `ChatViewModel` to call backend
-5. Display summary in chat view
-6. Test: Long-press conversation → See summary
-
-**Deliverables:**
-- RAG summarization working
-- Context-aware summaries displayed in iOS
-
----
-
-### Phase 4: Events, Reminders, Decisions (Day 2-3)
+### Phase 3: Events, Reminders, Decisions (Day 2-3)
 **Goal:** CRUD operations with vector search
 
 **Tasks:**
@@ -907,7 +875,7 @@ logger.error("OpenAI API failed", exc_info=True)
 
 ---
 
-### Phase 5: LangChain Agent (Day 3)
+### Phase 4: LangChain Agent (Day 3)
 **Goal:** Proactive assistant with conflict detection
 
 **Tasks:**
@@ -925,7 +893,7 @@ logger.error("OpenAI API failed", exc_info=True)
 
 ---
 
-### Phase 6: Polish & Deploy (Day 4)
+### Phase 5: Polish & Deploy (Day 4)
 **Goal:** Production-ready system
 
 **Tasks:**
@@ -951,7 +919,7 @@ logger.error("OpenAI API failed", exc_info=True)
 - ✅ All 6 AI features working
 - ✅ iOS can call Python backend
 - ✅ Vector search returns relevant results
-- ✅ RAG summaries include context
+- ✅ Decision detection uses lightweight RAG for context
 - ✅ LangChain agent detects conflicts
 
 ### Non-Functional

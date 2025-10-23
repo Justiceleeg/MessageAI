@@ -11,4 +11,20 @@ firebase/database.rules.json
 # Will be made private before production deployment
 # ios-app/MessageAI/GoogleService-Info.plist
 
-.vscode/
+# macOS
+.DS_Store
+
+# Python Backend
+python-backend/.env
+python-backend/.env.local
+python-backend/venv/
+python-backend/__pycache__/
+python-backend/**/__pycache__/
+python-backend/*.pyc
+python-backend/**/*.pyc
+python-backend/.pytest_cache/
+python-backend/**/.pytest_cache/
+python-backend/.vscode/
+
+# Root-level IDE config (keep python-backend/.vscode/ for Python settings)
+/.vscode/
