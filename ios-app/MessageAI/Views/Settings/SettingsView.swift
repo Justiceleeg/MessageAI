@@ -117,7 +117,9 @@ struct SettingsView: View {
                 titleVisibility: .visible
             ) {
                 Button("Logout", role: .destructive) {
-                    handleLogout()
+                    Task {
+                        await handleLogout()
+                    }
                 }
                 Button("Cancel", role: .cancel) {}
             }
@@ -130,11 +132,9 @@ struct SettingsView: View {
     
     // MARK: - Actions
     
-    private func handleLogout() {
-        Task {
-            await authViewModel.signOut()
-            dismiss()
-        }
+    private func handleLogout() async {
+        authViewModel.signOut()
+        dismiss()
     }
     
     // MARK: - Helper Methods

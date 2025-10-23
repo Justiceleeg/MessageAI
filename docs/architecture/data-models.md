@@ -76,3 +76,117 @@ interface Message {
 ```
 
 **Relationships**: Belongs to a specific Conversation (will be stored in a sub-collection in Firestore). Linked to a User via senderId.
+
+## Event
+
+**Purpose**: Represents a calendar event or social gathering created from conversations (AI-powered feature).
+
+**Key Attributes**:
+- `eventId`: string - Unique identifier for the event.
+- `title`: string - Event name/description (e.g., "Dinner Friday 7pm").
+- `date`: timestamp - Event date.
+- `time`: string (optional) - Event time in "HH:mm" format.
+- `location`: string (optional) - Event location.
+- `creatorUserId`: string - userId of the user who created the event.
+- `createdAt`: timestamp - When the event was created.
+- `createdInConversationId`: string - Conversation where the event was first created.
+- `createdAtMessageId`: string - Message that triggered event creation.
+- `invitations`: map<string, Invitation> - Map of conversationId to Invitation object for multi-chat tracking.
+- `attendees`: map<string, Attendee> - Map of userId to Attendee object with RSVP status.
+
+**Supporting Types**:
+- `Invitation`: { messageId: string, invitedUserIds: string[] }
+- `Attendee`: { status: RSVPStatus, rsvpMessageId?: string, rsvpConversationId?: string, rsvpAt?: timestamp }
+- `RSVPStatus`: enum ("pending", "accepted", "declined")
+
+**TypeScript Interface**
+
+```typescript
+interface Event {
+  eventId: string;
+  title: string;
+  date: FirebaseFirestore.Timestamp;
+  time?: string;
+  location?: string;
+  creatorUserId: string;
+  createdAt: FirebaseFirestore.Timestamp;
+  createdInConversationId: string;
+  createdAtMessageId: string;
+  invitations: { [conversationId: string]: Invitation };
+  attendees: { [userId: string]: Attendee };
+}
+
+interface Invitation {
+  messageId: string;
+  invitedUserIds: string[];
+}
+
+interface Attendee {
+  status: 'pending' | 'accepted' | 'declined';
+  rsvpMessageId?: string;
+  rsvpConversationId?: string;
+  rsvpAt?: FirebaseFirestore.Timestamp;
+}
+```
+
+**Relationships**: Created from Conversation and Message. Links to multiple users via attendees map.
+
+## Reminder
+
+**Purpose**: Represents a personal task or reminder with deadline (AI-powered feature).
+
+**Key Attributes**:
+- `reminderId`: string - Unique identifier for the reminder.
+- `userId`: string - User who owns this reminder.
+- `title`: string - Reminder text (e.g., "Send docs by tomorrow").
+- `dueDate`: timestamp - When the reminder is due.
+- `conversationId`: string - Conversation where reminder was created.
+- `sourceMessageId`: string - Message that triggered reminder creation.
+- `completed`: boolean - Completion status.
+- `createdAt`: timestamp - When reminder was created.
+- `notificationId`: string (optional) - System notification ID for local notifications.
+
+**TypeScript Interface**
+
+```typescript
+interface Reminder {
+  reminderId: string;
+  userId: string;
+  title: string;
+  dueDate: FirebaseFirestore.Timestamp;
+  conversationId: string;
+  sourceMessageId: string;
+  completed: boolean;
+  createdAt: FirebaseFirestore.Timestamp;
+  notificationId?: string;
+}
+```
+
+**Relationships**: Belongs to a User. Created from Conversation and Message.
+
+## Decision
+
+**Purpose**: Represents a group decision or agreement made in conversations (AI-powered feature).
+
+**Key Attributes**:
+- `decisionId`: string - Unique identifier for the decision.
+- `userId`: string - User who saved this decision.
+- `text`: string - Decision text (e.g., "Going to Italian restaurant").
+- `conversationId`: string - Conversation where decision was made.
+- `sourceMessageId`: string - Message that contains the decision.
+- `timestamp`: timestamp - When decision was recorded.
+
+**TypeScript Interface**
+
+```typescript
+interface Decision {
+  decisionId: string;
+  userId: string;
+  text: string;
+  conversationId: string;
+  sourceMessageId: string;
+  timestamp: FirebaseFirestore.Timestamp;
+}
+```
+
+**Relationships**: Belongs to a User. Created from Conversation and Message.

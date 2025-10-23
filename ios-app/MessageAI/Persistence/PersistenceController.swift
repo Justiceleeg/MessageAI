@@ -26,11 +26,14 @@ final class PersistenceController {
 
     private init() {
         do {
-            // Configure the model container with UserEntity, ConversationEntity, and MessageEntity
+            // Configure the model container with all entities
             let schema = Schema([
                 UserEntity.self,
                 ConversationEntity.self,
-                MessageEntity.self
+                MessageEntity.self,
+                EventEntity.self,
+                ReminderEntity.self,
+                DecisionEntity.self
             ])
 
             let modelConfiguration = ModelConfiguration(
@@ -79,7 +82,10 @@ final class PersistenceController {
             let schema = Schema([
                 UserEntity.self,
                 ConversationEntity.self,
-                MessageEntity.self
+                MessageEntity.self,
+                EventEntity.self,
+                ReminderEntity.self,
+                DecisionEntity.self
             ])
 
             let modelConfiguration = ModelConfiguration(
