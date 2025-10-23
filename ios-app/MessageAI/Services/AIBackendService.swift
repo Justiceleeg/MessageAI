@@ -10,6 +10,14 @@ import Foundation
 /// Service for communicating with the AI backend
 class AIBackendService {
     
+    // MARK: - Configuration
+    
+    /// Production backend URL (update this with your Render.com URL)
+    static let productionURL = "https://messageai-backend-egkh.onrender.com"
+    
+    /// Local development URL
+    static let localURL = "http://localhost:8000"
+    
     // MARK: - Properties
     
     private let baseURL: String
@@ -17,9 +25,9 @@ class AIBackendService {
     
     // MARK: - Initialization
     
-    /// Initialize with base URL (defaults to localhost for development)
-    /// - Parameter baseURL: Backend server URL (e.g., "http://localhost:8000" or production URL)
-    init(baseURL: String = "http://localhost:8000") {
+    /// Initialize with base URL (defaults to production)
+    /// - Parameter baseURL: Backend server URL
+    init(baseURL: String = AIBackendService.productionURL) {
         self.baseURL = baseURL
         
         // Configure URLSession with timeout
