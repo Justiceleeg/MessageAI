@@ -64,7 +64,17 @@ struct ChatView: View {
     var body: some View {
         VStack(spacing: 0) {
             // Message list
-            messageListView
+            ZStack(alignment: .bottomLeading) {
+                messageListView
+                
+                // Typing indicator (Story 3.5) - positioned at bottom left, flush to bottom
+                if !viewModel.typingUsers.isEmpty {
+                    TypingIndicatorView(typingUsers: viewModel.typingUsers)
+                        .padding(.leading, 8)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        .animation(.easeInOut(duration: 0.3), value: viewModel.typingUsers.count)
+                }
+            }
             
             // Message input bar
             MessageInputBar(
@@ -76,6 +86,10 @@ struct ChatView: View {
                     }
                 }
             )
+            .onChange(of: viewModel.messageText) { oldValue, newValue in
+                // Handle typing state change (Story 3.5)
+                viewModel.handleTypingChange(oldValue: oldValue, newValue: newValue)
+            }
         }
         .navigationTitle(viewModel.otherUserDisplayName.isEmpty ? "Chat" : viewModel.otherUserDisplayName)
         .navigationBarTitleDisplayMode(.inline)
@@ -170,6 +184,7 @@ struct ChatView: View {
                         }
                         .padding(.vertical, 8)
                         .padding(.horizontal, 8)
+                        .padding(.bottom, 20)  // Space at bottom for typing indicator
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .background(Color(uiColor: .systemGroupedBackground))
@@ -177,14 +192,14 @@ struct ChatView: View {
                         // Auto-scroll to bottom when new message arrives
                         if let lastMessage = newMessages.last {
                             withAnimation(.easeOut(duration: 0.3)) {
-                                scrollProxy.scrollTo(lastMessage.id, anchor: .bottom)
+                                scrollProxy.scrollTo(lastMessage.id, anchor: .top)
                             }
                         }
                     }
                     .onAppear {
                         // Scroll to bottom on initial load
                         if let lastMessage = viewModel.messages.last {
-                            scrollProxy.scrollTo(lastMessage.id, anchor: .bottom)
+                            scrollProxy.scrollTo(lastMessage.id, anchor: .top)
                         }
                     }
                 }

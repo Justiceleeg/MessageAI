@@ -31,6 +31,9 @@ final class ChatViewModel: ObservableObject {
     @Published var participantPresence: [String: Bool] = [:]  // userId -> isOnline
     @Published var participantLastSeen: [String: Date] = [:]  // userId -> lastSeen Date
     
+    // Typing indicators (Story 3.5)
+    @Published var typingUsers: [User] = []  // Users currently typing
+    
     // MARK: - Private Properties
     
     private let otherUserId: String
@@ -58,6 +61,10 @@ final class ChatViewModel: ObservableObject {
     // Read receipt tracking (Story 3.2)
     private var readReceiptTask: Task<Void, Never>?
     private var pendingReadMessageIds: Set<String> = []
+    
+    // Typing indicators (Story 3.5)
+    private var typingCancellable: AnyCancellable?
+    private var textDebounceTimer: Timer?
     
     // Computed property for participants array
     private var participants: [String] {
@@ -120,6 +127,8 @@ final class ChatViewModel: ObservableObject {
                 await markMessagesAsDeliveredAsync()
                 // Start presence listening after conversation is loaded (Story 3.3)
                 startPresenceListening()
+                // Start typing indicator listening (Story 3.5)
+                startTypingListening()
                 // Mark all visible messages as read (Story 4.1 - catch messages already on screen)
                 markAllVisibleMessagesAsRead()
             }
@@ -135,6 +144,12 @@ final class ChatViewModel: ObservableObject {
         stopListeningToMessages()
         stopNetworkObserver()
         stopPresenceListening()  // Story 3.3
+        stopTypingListening()  // Story 3.5
+        
+        // Stop typing indicator when leaving chat
+        if let conversationId = conversationId {
+            presenceService.stopTyping(in: conversationId)
+        }
     }
     
     // MARK: - Network Monitoring
@@ -369,6 +384,9 @@ final class ChatViewModel: ObservableObject {
         messageText = ""
         errorMessage = nil
         
+        // Stop typing indicator when sending message (Story 3.5)
+        stopTypingOnSend()
+        
         // 1. Create optimistic message and add to UI immediately
         let messageId = UUID().uuidString
         let optimisticMessage = Message(
@@ -436,6 +454,9 @@ final class ChatViewModel: ObservableObject {
                 // Start listening to messages
                 loadMessages()
                 
+                // Start typing listener now that we have a conversationId (Story 3.5)
+                startTypingListening()
+                
             } else {
                 // New 1:1 conversation - create conversation with first message
                 logger.info("Creating new 1:1 conversation with first message")
@@ -453,6 +474,9 @@ final class ChatViewModel: ObservableObject {
                 // Start listening to messages now that conversation exists
                 // The listener will replace the optimistic message with the confirmed one
                 loadMessages()
+                
+                // Start typing listener now that we have a conversationId (Story 3.5)
+                startTypingListening()
             }
             
         } catch {
@@ -1222,6 +1246,72 @@ final class ChatViewModel: ObservableObject {
             let days = Int(interval / 86400)
             return "Last seen \(days)d ago"
         }
+    }
+    
+    // MARK: - Typing Indicators (Story 3.5)
+    
+    /// Start listening to typing users in the conversation
+    func startTypingListening() {
+        guard let conversationId = conversationId else {
+            logger.info("No conversationId - skipping typing listener")
+            return
+        }
+        
+        logger.info("Starting typing indicator listener for conversation: \(conversationId)")
+        
+        typingCancellable = presenceService.observeTypingUsers(in: conversationId)
+            .sink { [weak self] typingUserIds in
+                guard let self = self else { return }
+                
+                Task { @MainActor in
+                    // Fetch User objects for the typing users
+                    var users: [User] = []
+                    for userId in typingUserIds {
+                        do {
+                            let user = try await self.firestoreService.fetchUser(userId: userId)
+                            users.append(user)
+                        } catch {
+                            self.logger.error("Failed to fetch typing user \(userId): \(error.localizedDescription)")
+                        }
+                    }
+                    
+                    self.typingUsers = users
+                    self.logger.debug("Updated typing users: \(users.map { $0.displayName })")
+                }
+            }
+    }
+    
+    /// Stop listening to typing users
+    func stopTypingListening() {
+        logger.info("Stopping typing indicator listener")
+        typingCancellable?.cancel()
+        typingCancellable = nil
+        typingUsers.removeAll()
+    }
+    
+    /// Handle typing state change when messageText changes
+    func handleTypingChange(oldValue: String, newValue: String) {
+        guard let conversationId = conversationId else { return }
+        
+        // Cancel existing debounce timer
+        textDebounceTimer?.invalidate()
+        
+        if newValue.isEmpty {
+            // Stopped typing
+            presenceService.stopTyping(in: conversationId)
+        } else if oldValue.isEmpty {
+            // Started typing
+            presenceService.startTyping(in: conversationId)
+        } else {
+            // Continue typing - the PresenceService will handle throttling and auto-stop
+            presenceService.startTyping(in: conversationId)
+        }
+    }
+    
+    /// Stop typing when message is sent
+    func stopTypingOnSend() {
+        guard let conversationId = conversationId else { return }
+        presenceService.stopTyping(in: conversationId)
     }
 }
 
