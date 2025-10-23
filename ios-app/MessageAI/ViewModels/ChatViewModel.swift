@@ -120,6 +120,8 @@ final class ChatViewModel: ObservableObject {
                 await markMessagesAsDeliveredAsync()
                 // Start presence listening after conversation is loaded (Story 3.3)
                 startPresenceListening()
+                // Mark all visible messages as read (Story 4.1 - catch messages already on screen)
+                markAllVisibleMessagesAsRead()
             }
         } else {
             // For new conversations, start presence listening immediately (Story 3.3)
@@ -288,6 +290,8 @@ final class ChatViewModel: ObservableObject {
         // Mark any new undelivered messages as delivered (Story 3.2)
         Task {
             await markMessagesAsDeliveredAsync()
+            // Also mark visible messages as read (Story 4.1 - catch new messages)
+            markAllVisibleMessagesAsRead()
         }
     }
     
@@ -932,16 +936,67 @@ final class ChatViewModel: ObservableObject {
                 return message.status
             }
             
-            // Check if all other participants have read the message
-            let allRead = otherParticipants.allSatisfy { message.readBy.contains($0) }
+            // Check if ANY other participant has read the message (Story 4.1 - for group chats)
+            // We'll show the count badge, so just check if at least one person read it
+            let anyRead = otherParticipants.contains(where: { message.readBy.contains($0) })
             
-            logger.debug("Message \(message.messageId): allRead=\(allRead)")
+            logger.debug("Message \(message.messageId): anyRead=\(anyRead), readCount=\(message.readBy.filter { $0 != currentUserId }.count)")
             
-            // Return "read" if all have read, otherwise return delivered
-            return allRead ? "read" : "delivered"
+            // Return "read" if any participant has read, otherwise return delivered
+            return anyRead ? "read" : "delivered"
         }
         
         return message.status
+    }
+    
+    /// Calculate read count for a message (Story 4.1)
+    /// Returns the number of participants who have read the message (excluding sender)
+    func calculateReadCount(for message: Message) -> Int {
+        guard let currentUserId = authService.currentUser?.userId else {
+            return 0
+        }
+        
+        // Only count reads for messages sent by current user
+        guard message.senderId == currentUserId else {
+            return 0
+        }
+        
+        // Count how many users have read (excluding current user from readBy)
+        let readByOthers = message.readBy.filter { $0 != currentUserId }
+        let count = readByOthers.count
+        
+        logger.debug("Read count for message \(message.messageId): \(count) (readBy: \(message.readBy))")
+        
+        return count
+    }
+    
+    /// Check if a message should show read receipt badge (Story 4.1 UX optimization)
+    /// Only show read badge on the LATEST read message, assume earlier ones are read
+    func shouldShowReadReceipt(for message: Message) -> Bool {
+        guard let currentUserId = authService.currentUser?.userId else {
+            return false
+        }
+        
+        // Only show for messages sent by current user
+        guard message.senderId == currentUserId else {
+            return false
+        }
+        
+        // Only show for messages with "read" status
+        guard computeMessageStatus(for: message) == "read" else {
+            return false
+        }
+        
+        // Find the latest read message sent by current user
+        let sentMessages = messages.filter { $0.senderId == currentUserId }
+        
+        // Find the last message with "read" status
+        if let lastReadMessage = sentMessages.last(where: { computeMessageStatus(for: $0) == "read" }) {
+            // Only show read receipt on the latest read message
+            return message.messageId == lastReadMessage.messageId
+        }
+        
+        return false
     }
     
     /// Mark messages as delivered when ChatView appears (Story 3.2) - Async version
@@ -982,7 +1037,7 @@ final class ChatViewModel: ObservableObject {
         }
         
         // Small delay to ensure Firestore updates propagate before read receipts
-        try? await Task.sleep(for: .milliseconds(500))
+        try? await Task.sleep(for: .milliseconds(200))
         logger.info("Delivered status updates complete, read receipts can now fire")
     }
     
@@ -1012,9 +1067,10 @@ final class ChatViewModel: ObservableObject {
             return
         }
         
-        // Skip if message is still in "sending" or "sent" status (wait for delivered first)
-        if message.status == "sending" || message.status == "sent" {
-            logger.debug("Message \(messageId) not yet delivered (status: \(message.status)), skipping read receipt for now")
+        // Skip if message is still in "sending" status only
+        // For "sent" messages, we can mark as read immediately if user is viewing (Story 4.1 optimization)
+        if message.status == "sending" {
+            logger.debug("Message \(messageId) still sending, skipping read receipt for now")
             return
         }
         
@@ -1026,10 +1082,10 @@ final class ChatViewModel: ObservableObject {
         // Cancel existing task
         readReceiptTask?.cancel()
         
-        // Schedule batch update after throttle delay (2 seconds for better visibility)
+        // Schedule batch update after throttle delay (300ms for near-instant read receipts when both users are active)
         readReceiptTask = Task { @MainActor in
             do {
-                try await Task.sleep(for: .seconds(2))
+                try await Task.sleep(for: .milliseconds(300))
                 
                 guard !pendingReadMessageIds.isEmpty else { return }
                 
@@ -1052,6 +1108,17 @@ final class ChatViewModel: ObservableObject {
             } catch {
                 logger.error("Failed to batch mark messages as read: \(error.localizedDescription)")
             }
+        }
+    }
+    
+    /// Mark all currently visible messages as read (Story 4.1 - fix for messages already on screen)
+    /// Call this when chat view appears to catch messages that are already displayed
+    func markAllVisibleMessagesAsRead() {
+        logger.info("Marking all visible messages as read")
+        
+        // Mark each message that should be read
+        for message in messages {
+            markMessageAsReadIfVisible(messageId: message.id)
         }
     }
     

@@ -157,7 +157,9 @@ struct ChatView: View {
                                     } : nil,
                                     isGroupChat: viewModel.conversation?.isGroupChat ?? false,
                                     senderName: !viewModel.isSentByCurrentUser(message: message) ? viewModel.getSenderDisplayName(userId: message.senderId) : nil,
-                                    isOnline: viewModel.participantPresence[message.senderId]  // Story 3.3: Show online status in group chats
+                                    isOnline: viewModel.participantPresence[message.senderId],  // Story 3.3: Show online status in group chats
+                                    readCount: viewModel.calculateReadCount(for: message),  // Story 4.1: Read receipt count
+                                    shouldShowReadReceipt: viewModel.shouldShowReadReceipt(for: message)  // Story 4.1: Only show on latest
                                 )
                                 .id(message.id)
                                 .onAppear {
