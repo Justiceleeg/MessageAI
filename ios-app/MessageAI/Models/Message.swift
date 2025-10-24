@@ -7,6 +7,12 @@
 
 import Foundation
 
+/// Priority level for message urgency detection (Story 5.3)
+enum Priority: String, Codable {
+    case medium
+    case high
+}
+
 /// Represents a message in a 1:1 or group conversation
 /// 
 /// Status Values:
@@ -22,6 +28,7 @@ struct Message: Identifiable, Codable, Equatable {
     let timestamp: Date
     var status: String  // "sending", "sent", "delivered", "read"
     var readBy: [String]  // Array of userIds who have read this message
+    var priority: Priority?  // NEW: Priority level for urgent messages (Story 5.3)
     
     /// Helper to determine if message was sent by current user for UI layout
     func isSentByCurrentUser(currentUserId: String) -> Bool {
@@ -36,9 +43,10 @@ struct Message: Identifiable, Codable, Equatable {
         case timestamp
         case status
         case readBy
+        case priority
     }
     
-    init(id: String, messageId: String, senderId: String, text: String, timestamp: Date, status: String = "sending", readBy: [String] = []) {
+    init(id: String, messageId: String, senderId: String, text: String, timestamp: Date, status: String = "sending", readBy: [String] = [], priority: Priority? = nil) {
         self.id = id
         self.messageId = messageId
         self.senderId = senderId
@@ -46,6 +54,7 @@ struct Message: Identifiable, Codable, Equatable {
         self.timestamp = timestamp
         self.status = status
         self.readBy = readBy
+        self.priority = priority
     }
     
     /// Initialize from Firestore decoder
@@ -59,6 +68,7 @@ struct Message: Identifiable, Codable, Equatable {
         self.timestamp = try container.decode(Date.self, forKey: .timestamp)
         self.status = try container.decode(String.self, forKey: .status)
         self.readBy = try container.decodeIfPresent([String].self, forKey: .readBy) ?? []
+        self.priority = try container.decodeIfPresent(Priority.self, forKey: .priority)
     }
 }
 

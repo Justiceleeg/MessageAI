@@ -357,6 +357,7 @@ struct RSVPDetection: Codable {
 struct PriorityDetection: Codable {
     let detected: Bool
     let level: String?  // "low", "medium", "high"
+    let reason: String?  // Brief explanation of priority assignment (Story 5.3)
 }
 
 /// Conflict detection

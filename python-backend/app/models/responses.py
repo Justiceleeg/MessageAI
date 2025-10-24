@@ -207,6 +207,7 @@ class PriorityDetection(BaseModel):
     """Priority/urgency detection result"""
     detected: bool = Field(..., description="Whether priority was detected")
     level: Optional[str] = Field(None, description="Priority level (low, medium, high)")
+    reason: Optional[str] = Field(None, description="Brief explanation of priority assignment")
 
 
 class ConflictDetection(BaseModel):

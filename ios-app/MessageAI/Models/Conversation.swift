@@ -28,6 +28,9 @@ struct Conversation: Identifiable, Codable {
     /// Timestamp of the most recent message
     var lastMessageTimestamp: Date?
     
+    /// Number of unread messages for the current user
+    var unreadCount: Int = 0
+    
     /// Indicates if this is a group chat (more than 2 participants)
     let isGroupChat: Bool
     
@@ -41,19 +44,21 @@ struct Conversation: Identifiable, Codable {
         case participants
         case lastMessageText
         case lastMessageTimestamp
+        case unreadCount
         case isGroupChat
         case groupName
     }
     
     // MARK: - Initialization
     
-    init(conversationId: String, participants: [String], lastMessageText: String? = nil, lastMessageTimestamp: Date? = nil, isGroupChat: Bool = false, groupName: String? = nil) {
+    init(conversationId: String, participants: [String], lastMessageText: String? = nil, lastMessageTimestamp: Date? = nil, isGroupChat: Bool = false, groupName: String? = nil, unreadCount: Int = 0) {
         self.conversationId = conversationId
         self.participants = participants
         self.lastMessageText = lastMessageText
         self.lastMessageTimestamp = lastMessageTimestamp
         self.isGroupChat = isGroupChat
         self.groupName = groupName
+        self.unreadCount = unreadCount
     }
     
     // MARK: - Helper Methods
@@ -81,6 +86,7 @@ struct Conversation: Identifiable, Codable {
         self.lastMessageText = data["lastMessageText"] as? String
         self.isGroupChat = isGroupChat
         self.groupName = data["groupName"] as? String
+        self.unreadCount = data["unreadCount"] as? Int ?? 0
         
         // Handle timestamp conversion
         if let timestamp = data["lastMessageTimestamp"] as? Timestamp {
@@ -120,7 +126,8 @@ extension Conversation: Hashable {
         lhs.lastMessageTimestamp == rhs.lastMessageTimestamp &&
         lhs.participants == rhs.participants &&
         lhs.isGroupChat == rhs.isGroupChat &&
-        lhs.groupName == rhs.groupName
+        lhs.groupName == rhs.groupName &&
+        lhs.unreadCount == rhs.unreadCount  // Story 5.3: Include unreadCount in equality
     }
     
     func hash(into hasher: inout Hasher) {

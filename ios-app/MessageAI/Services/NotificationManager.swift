@@ -280,8 +280,9 @@ class NotificationManager: NSObject {
     ///   - conversationId: The conversation ID
     ///   - title: Notification title
     ///   - body: Notification body text
-    func scheduleLocalNotification(conversationId: String, title: String, body: String) {
-        print("NotificationManager: Attempting to schedule local notification for conversation: \(conversationId)")
+    ///   - priority: Optional message priority for special notification handling (Story 5.3 AC5)
+    func scheduleLocalNotification(conversationId: String, title: String, body: String, priority: Priority? = nil) {
+        print("NotificationManager: Attempting to schedule local notification for conversation: \(conversationId), priority: \(priority?.rawValue ?? "none")")
         
         guard hasPermission else {
             print("NotificationManager: Cannot schedule notification - permission not granted")
@@ -299,6 +300,21 @@ class NotificationManager: NSObject {
         content.sound = .default
         content.userInfo = ["conversationId": conversationId]
         
+        // Story 5.3 AC5: Apply priority notification styling if enabled
+        if let priority = priority {
+            let priorityEnabled = UserDefaults.standard.bool(forKey: "priorityNotificationsEnabled")
+            
+            if priorityEnabled && priority == .high {
+                // iOS 15+ only: Set interruption level for time-sensitive notifications
+                if #available(iOS 15.0, *) {
+                    content.interruptionLevel = .timeSensitive
+                    print("NotificationManager: Applied time-sensitive interruption level for high priority")
+                }
+                // Add visual indicator (red icon badge)
+                content.badge = NSNumber(value: 1)
+            }
+        }
+        
         // Immediate trigger (0.1 seconds)
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 0.1, repeats: false)
         let request = UNNotificationRequest(
@@ -311,7 +327,7 @@ class NotificationManager: NSObject {
             if let error = error {
                 print("NotificationManager: Error scheduling notification: \(error.localizedDescription)")
             } else {
-                print("NotificationManager: Scheduled local notification - Title: '\(title)', Body: '\(body)'")
+                print("NotificationManager: Scheduled local notification - Title: '\(title)', Body: '\(body)', Priority: \(priority?.rawValue ?? "none")")
             }
         }
     }
@@ -337,14 +353,24 @@ class NotificationManager: NSObject {
             return
         }
         
-        print("NotificationManager: New message detected - ConversationID: \(conversationId), SenderId: \(senderId)")
+        // Extract priority if available (Story 5.3)
+        let priorityString = messageData["priority"] as? String
+        let priority: Priority? = {
+            if let priorityString = priorityString {
+                return Priority(rawValue: priorityString)
+            }
+            return nil
+        }()
+        
+        print("NotificationManager: New message detected - ConversationID: \(conversationId), SenderId: \(senderId), Priority: \(priority?.rawValue ?? "none")")
         
         // Fetch sender name and conversation details
         Task { @MainActor in
             await self.fetchDetailsAndTriggerNotification(
                 conversationId: conversationId,
                 senderId: senderId,
-                messageText: text
+                messageText: text,
+                priority: priority
             )
         }
     }
@@ -354,11 +380,13 @@ class NotificationManager: NSObject {
     ///   - conversationId: The conversation ID
     ///   - senderId: The sender's user ID
     ///   - messageText: The message text
+    ///   - priority: Optional message priority for notification handling (Story 5.3)
     @MainActor
     private func fetchDetailsAndTriggerNotification(
         conversationId: String,
         senderId: String,
-        messageText: String
+        messageText: String,
+        priority: Priority? = nil
     ) async {
         print("NotificationManager: Fetching details for notification")
         
@@ -393,7 +421,7 @@ class NotificationManager: NSObject {
             showInAppBanner(conversationId: conversationId, title: title, message: messageText)
         } else {
             print("NotificationManager: App in background, scheduling local notification")
-            scheduleLocalNotification(conversationId: conversationId, title: title, body: messageText)
+            scheduleLocalNotification(conversationId: conversationId, title: title, body: messageText, priority: priority)
         }
     }
 }

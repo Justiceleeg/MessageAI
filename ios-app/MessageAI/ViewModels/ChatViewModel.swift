@@ -270,6 +270,7 @@ final class ChatViewModel: ObservableObject {
     /// Merge Firestore messages with local optimistic messages
     /// This prevents the listener from overwriting optimistic messages before Firestore confirms them
     private func mergeMessages(firestoreMessages: [Message]) {
+        logger.info("🔄 MERGE MESSAGES CALLED with \(firestoreMessages.count) messages from Firestore")
         // Start with Firestore messages (source of truth)
         var mergedMessages = firestoreMessages
         
@@ -1080,36 +1081,36 @@ final class ChatViewModel: ObservableObject {
     }
     
     /// Mark a message as read when it becomes visible (Story 3.2)
-    func markMessageAsReadIfVisible(messageId: String) {
+    func markMessageAsReadIfVisible(messageId: String) -> Bool {
         guard let conversationId = conversationId,
               let currentUserId = authService.currentUser?.userId else {
             logger.warning("Cannot mark read - missing conversationId or currentUserId")
-            return
+            return false
         }
         
         // Find the message
         guard let message = messages.first(where: { $0.id == messageId }) else {
             logger.debug("Message \(messageId) not found in messages array")
-            return
+            return false
         }
         
         // Only mark messages from other users
         guard message.senderId != currentUserId else {
             logger.debug("Skipping own message \(messageId)")
-            return
+            return false
         }
         
         // Only mark if not already read by current user
         guard !message.readBy.contains(currentUserId) else {
             logger.debug("Message \(messageId) already read by current user")
-            return
+            return false
         }
         
         // Skip if message is still in "sending" status only
         // For "sent" messages, we can mark as read immediately if user is viewing (Story 4.1 optimization)
         if message.status == "sending" {
             logger.debug("Message \(messageId) still sending, skipping read receipt for now")
-            return
+            return false
         }
         
         logger.debug("Adding message \(messageId) to pending read queue (current status: \(message.status))")
@@ -1125,12 +1126,15 @@ final class ChatViewModel: ObservableObject {
             do {
                 try await Task.sleep(for: .milliseconds(300))
                 
-                guard !pendingReadMessageIds.isEmpty else { return }
+                guard !pendingReadMessageIds.isEmpty else { 
+                    logger.debug("No pending messages to mark as read")
+                    return 
+                }
                 
                 let messageIdsToMark = Array(pendingReadMessageIds)
                 pendingReadMessageIds.removeAll()
                 
-                logger.info("Batch marking \(messageIdsToMark.count) messages as read")
+                logger.info("📝 Batch marking \(messageIdsToMark.count) messages as read: \(messageIdsToMark.prefix(3))...")
                 
                 try await firestoreService.batchMarkMessagesAsRead(
                     conversationId: conversationId,
@@ -1138,26 +1142,57 @@ final class ChatViewModel: ObservableObject {
                     userId: currentUserId
                 )
                 
-                logger.info("Successfully batch marked \(messageIdsToMark.count) messages as read")
+                logger.info("✅ Successfully batch marked \(messageIdsToMark.count) messages as read")
                 
             } catch is CancellationError {
                 // Task was cancelled, this is expected
                 logger.debug("Read receipt task cancelled")
             } catch {
-                logger.error("Failed to batch mark messages as read: \(error.localizedDescription)")
+                logger.error("❌ Failed to batch mark messages as read: \(error.localizedDescription)")
             }
         }
+        
+        return true  // Message was queued to be marked as read
     }
     
     /// Mark all currently visible messages as read (Story 4.1 - fix for messages already on screen)
     /// Call this when chat view appears to catch messages that are already displayed
     func markAllVisibleMessagesAsRead() {
-        logger.info("Marking all visible messages as read")
+        guard let currentUserId = authService.currentUser?.userId else {
+            logger.warning("Cannot mark messages as read - no current user")
+            return
+        }
+        
+        logger.info("📖 Marking all visible messages as read (total: \(self.messages.count))")
+        
+        var markedCount = 0
+        var skippedOwnMessages = 0
+        var skippedAlreadyRead = 0
+        var skippedSending = 0
         
         // Mark each message that should be read
-        for message in messages {
-            markMessageAsReadIfVisible(messageId: message.id)
+        for message in self.messages {
+            // Check skip reasons
+            if message.senderId == currentUserId {
+                skippedOwnMessages += 1
+                continue
+            }
+            if message.readBy.contains(currentUserId) {
+                skippedAlreadyRead += 1
+                continue
+            }
+            if message.status == "sending" {
+                skippedSending += 1
+                continue
+            }
+            
+            let wasMarked = markMessageAsReadIfVisible(messageId: message.id)
+            if wasMarked {
+                markedCount += 1
+            }
         }
+        
+        logger.info("📖 Results: marked=\(markedCount), skipped_own=\(skippedOwnMessages), skipped_already_read=\(skippedAlreadyRead), skipped_sending=\(skippedSending), total=\(self.messages.count)")
     }
     
     /// Load conversation data for read receipt computation
@@ -1332,6 +1367,7 @@ final class ChatViewModel: ObservableObject {
     
     /// Analyze a message for events, reminders, decisions, etc.
     /// This happens in the background after the message is sent
+    /// Analyze message for AI features (Story 5.1)
     /// - Parameter message: The message to analyze
     func analyzeMessageForAI(_ message: Message) {
         guard let currentUser = authService.currentUser else { return }
@@ -1340,8 +1376,6 @@ final class ChatViewModel: ObservableObject {
         // Run analysis in background task
         Task {
             do {
-                logger.info("🤖 Analyzing message \(message.messageId) for AI features")
-                
                 let analysis = try await aiBackendService.analyzeMessage(
                     messageId: message.messageId,
                     text: message.text,
@@ -1350,15 +1384,14 @@ final class ChatViewModel: ObservableObject {
                     userCalendar: nil  // TODO: Pass user's calendar in future story
                 )
                 
-                // Update UI with analysis results
+                // Update UI with analysis results (for calendar/reminder/decision suggestions)
                 await MainActor.run {
                     self.aiSuggestions[message.messageId] = analysis
-                    logger.info("✅ AI analysis complete for \(message.messageId). Calendar: \(analysis.calendar.detected), Reminder: \(analysis.reminder.detected), Decision: \(analysis.decision.detected)")
                 }
                 
             } catch {
                 // Silent failure - don't disrupt user experience
-                logger.error("AI analysis failed for message \(message.messageId): \(error.localizedDescription)")
+                logger.debug("AI analysis failed for message \(message.messageId): \(error.localizedDescription)")
             }
         }
     }

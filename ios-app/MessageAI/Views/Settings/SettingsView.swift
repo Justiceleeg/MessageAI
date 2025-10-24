@@ -19,6 +19,7 @@ struct SettingsView: View {
     
     @State private var showLogoutConfirmation: Bool = false
     @State private var notificationPermissionStatus: UNAuthorizationStatus = .notDetermined
+    @State private var priorityNotificationsEnabled: Bool = false  // Story 5.3 AC5
     @Environment(\.dismiss) private var dismiss
     
     // MARK: - Body
@@ -43,7 +44,7 @@ struct SettingsView: View {
                     .accessibilityValue(themeDisplayName(themeManager.currentTheme))
                 }
                 
-                // Notifications Section (Story 3.4)
+                // Notifications Section (Story 3.4, 5.3)
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
@@ -71,11 +72,26 @@ struct SettingsView: View {
                         }
                     }
                     .padding(.vertical, 4)
+                    
+                    // Priority Notifications Toggle (Story 5.3 AC5)
+                    Toggle(isOn: $priorityNotificationsEnabled) {
+                        HStack {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                            Text("Priority Notifications")
+                        }
+                    }
+                    .onChange(of: priorityNotificationsEnabled) { _, newValue in
+                        savePriorityNotificationSetting(newValue)
+                    }
+                    .accessibilityLabel("Priority Notifications")
+                    .accessibilityHint("Enable special alerts for urgent messages")
+                    
                 } header: {
                     Text("Notifications")
                 } footer: {
                     if notificationPermissionStatus != .denied {
-                        Text("In-app banners will still show even if notifications are disabled.")
+                        Text("Priority Notifications will use a distinct alert style for urgent messages.\n\nIn-app banners will still show even if notifications are disabled.")
                             .font(.caption)
                     }
                 }
@@ -126,6 +142,8 @@ struct SettingsView: View {
             .onAppear {
                 // Check notification permission status (Story 3.4)
                 checkNotificationPermissionStatus()
+                // Load priority notification setting (Story 5.3 AC5)
+                loadPriorityNotificationSetting()
             }
         }
     }
@@ -199,6 +217,17 @@ struct SettingsView: View {
         if let url = URL(string: UIApplication.openSettingsURLString) {
             UIApplication.shared.open(url)
         }
+    }
+    
+    /// Load priority notification setting from UserDefaults (Story 5.3 AC5)
+    private func loadPriorityNotificationSetting() {
+        priorityNotificationsEnabled = UserDefaults.standard.bool(forKey: "priorityNotificationsEnabled")
+    }
+    
+    /// Save priority notification setting to UserDefaults (Story 5.3 AC5)
+    private func savePriorityNotificationSetting(_ enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: "priorityNotificationsEnabled")
+        print("📱 Priority notifications \(enabled ? "enabled" : "disabled")")
     }
 }
 

@@ -231,9 +231,13 @@ Detect ALL of the following (return JSON):
    - status: "accepted" or "declined" (null if not detected)
    - event_reference: what event they're responding to (null if not clear)
 
-5. **priority**: Detect urgency/priority
+5. **priority**: Detect urgency/priority (Story 5.3)
    - detected: true/false
    - level: "low", "medium", or "high" (null if not detected)
+   - reason: brief explanation of why this priority was assigned
+   - HIGH priority indicators: "URGENT", "ASAP", "emergency", "critical", deadlines within hours, "waiting on you", "blocking"
+   - MEDIUM priority indicators: "important", "need", "can you", direct questions requiring response, "FYI" with action item
+   - LOW priority: normal conversation, no urgency indicators
 
 6. **conflict**: Detect schedule conflicts (check against user_calendar)
    - detected: true/false
@@ -247,7 +251,7 @@ Return ONLY valid JSON in this exact structure:
   "reminder": {{"detected": false, "title": null, "due_date": null}},
   "decision": {{"detected": false, "text": null}},
   "rsvp": {{"detected": false, "status": null, "event_reference": null}},
-  "priority": {{"detected": false, "level": null}},
+  "priority": {{"detected": false, "level": null, "reason": null}},
   "conflict": {{"detected": false, "conflicting_events": []}}
 }}"""
         
@@ -268,7 +272,7 @@ Return ONLY valid JSON in this exact structure:
                 "reminder": {"detected": False, "title": None, "due_date": None},
                 "decision": {"detected": False, "text": None},
                 "rsvp": {"detected": False, "status": None, "event_reference": None},
-                "priority": {"detected": False, "level": None},
+                "priority": {"detected": False, "level": None, "reason": None},
                 "conflict": {"detected": False, "conflicting_events": []}
             }
             # Merge defaults with result
@@ -289,7 +293,7 @@ Return ONLY valid JSON in this exact structure:
                 "reminder": {"detected": False, "title": None, "due_date": None},
                 "decision": {"detected": False, "text": None},
                 "rsvp": {"detected": False, "status": None, "event_reference": None},
-                "priority": {"detected": False, "level": None},
+                "priority": {"detected": False, "level": None, "reason": None},
                 "conflict": {"detected": False, "conflicting_events": []}
             }
 

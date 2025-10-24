@@ -33,6 +33,9 @@ final class ConversationListViewModel: ObservableObject {
     /// Map of user last seen timestamps (userId → lastSeen Date)
     @Published var userLastSeenMap: [String: Date] = [:]
     
+    /// Map of conversation priorities (conversationId → Priority) - Story 5.3
+    @Published var conversationPriorityMap: [String: Priority] = [:]
+    
     // MARK: - Private Properties
     
     private let firestoreService: FirestoreService
@@ -40,12 +43,19 @@ final class ConversationListViewModel: ObservableObject {
     private let presenceService = PresenceService()
     private var modelContext: ModelContext?
     private let logger = Logger(subsystem: "com.jpw.message-ai", category: "ConversationListViewModel")
+    private let aiBackendService = AIBackendService.shared  // Story 5.3: For analyzing messages
     
     /// In-memory cache for user display names to avoid repeated fetches
     private var userCache: [String: User] = [:]
     
     /// Active presence listeners (userId → DatabaseHandle) for visible conversation rows
     nonisolated(unsafe) private var activePresenceListeners: [String: DatabaseHandle] = [:]
+    
+    /// Active priority listeners (conversationId → Task) for priority calculation - Story 5.3
+    nonisolated(unsafe) private var activePriorityListeners: [String: Task<Void, Never>] = [:]
+    
+    /// Track which messages we've already analyzed (to avoid re-analyzing) - Story 5.3
+    nonisolated(unsafe) private var analyzedMessageIds = Set<String>()
     
     /// Task for managing the conversation listener
     nonisolated(unsafe) private var listenerTask: Task<Void, Never>?
@@ -218,6 +228,9 @@ final class ConversationListViewModel: ObservableObject {
                     
                     // Prefetch user details for all participants
                     await prefetchUserDetails(from: conversations)
+                    
+                    // Calculate initial unread counts for all conversations
+                    await calculateInitialUnreadCounts(for: conversations)
                 }
                 
             } catch {
@@ -358,6 +371,200 @@ final class ConversationListViewModel: ObservableObject {
         userLastSeenMap.removeAll()
     }
     
+    /// Calculate initial unread counts for all conversations (Story 5.3)
+    private func calculateInitialUnreadCounts(for conversations: [Conversation]) async {
+        guard let currentUserId = authService.currentUser?.userId else {
+            return
+        }
+        
+        // Calculate unread counts for each conversation
+        for conversation in conversations {
+            Task {
+                do {
+                    // Fetch messages for this conversation
+                    let messages = try await firestoreService.fetchMessages(conversationId: conversation.conversationId)
+                    
+                    // Count unread messages from others
+                    let unreadCount = messages.filter { message in
+                        message.senderId != currentUserId && !message.readBy.contains(currentUserId)
+                    }.count
+                    
+                    // Update the conversation's unread count
+                    await MainActor.run {
+                        if let index = self.conversations.firstIndex(where: { $0.conversationId == conversation.conversationId }) {
+                            var updatedConversation = self.conversations[index]
+                            updatedConversation.unreadCount = unreadCount
+                            self.conversations[index] = updatedConversation
+                        }
+                    }
+                } catch {
+                    logger.error("Failed to calculate unread count for \(conversation.conversationId): \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+    
+    // MARK: - Priority Tracking (Story 5.3)
+    
+    /// Start listening to messages for priority calculation
+    /// - Parameter conversationId: Conversation to track priority for
+    func startPriorityListener(for conversationId: String) {
+        // Skip if already listening
+        guard activePriorityListeners[conversationId] == nil else {
+            return
+        }
+        
+        guard let currentUserId = authService.currentUser?.userId else {
+            return
+        }
+        
+        let task = Task {
+            do {
+                let messageStream = firestoreService.listenToMessages(conversationId: conversationId)
+                
+                for try await messages in messageStream {
+                    // Filter for unread messages FROM OTHER USERS (not our own messages)
+                    let unreadMessages = messages.filter { message in
+                        // Only count messages from others that we haven't read
+                        message.senderId != currentUserId && !message.readBy.contains(currentUserId)
+                    }
+                    
+                    // Update conversation unreadCount
+                    await MainActor.run {
+                        if let index = self.conversations.firstIndex(where: { $0.conversationId == conversationId }) {
+                            // Create a new conversation with updated unread count
+                            // This ensures SwiftUI detects the change
+                            var updatedConversation = self.conversations[index]
+                            updatedConversation.unreadCount = unreadMessages.count
+                            self.conversations[index] = updatedConversation
+                        }
+                    }
+                    
+                    // Analyze any unread incoming messages that don't have priority yet
+                    for message in unreadMessages {
+                        // Skip if already analyzed or if it's our own message
+                        if analyzedMessageIds.contains(message.messageId) || message.senderId == currentUserId {
+                            continue
+                        }
+                        
+                        // Only analyze messages without priority
+                        if message.priority == nil {
+                            analyzedMessageIds.insert(message.messageId)
+                            
+                            // Analyze in background
+                            Task {
+                                await analyzeAndUpdateMessage(message, conversationId: conversationId)
+                            }
+                        }
+                    }
+                    
+                    // Calculate highest priority of unread messages
+                    let highestPriority = calculateHighestPriority(from: unreadMessages)
+                    
+                    await MainActor.run {
+                        if let priority = highestPriority {
+                            self.conversationPriorityMap[conversationId] = priority
+                        } else {
+                            // No priority - remove from map
+                            self.conversationPriorityMap.removeValue(forKey: conversationId)
+                        }
+                    }
+                }
+            } catch {
+                logger.error("Priority listener error for conversation \(conversationId): \(error.localizedDescription)")
+            }
+            
+            // Task ended - remove from active listeners
+            await MainActor.run {
+                self.activePriorityListeners.removeValue(forKey: conversationId)
+            }
+        }
+        
+        activePriorityListeners[conversationId] = task
+    }
+    
+    /// Stop listening to priority for a conversation
+    /// - Parameter conversationId: Conversation to stop tracking
+    func stopPriorityListener(for conversationId: String) {
+        guard let task = activePriorityListeners[conversationId] else {
+            return
+        }
+        
+        logger.info("Stopping priority listener for conversation \(conversationId)")
+        
+        task.cancel()
+        activePriorityListeners.removeValue(forKey: conversationId)
+        conversationPriorityMap.removeValue(forKey: conversationId)
+    }
+    
+    /// Calculate highest priority from messages
+    /// - Parameter messages: Array of messages to check
+    /// - Returns: Highest priority found (high > medium), or nil if no priority
+    private func calculateHighestPriority(from messages: [Message]) -> Priority? {
+        var hasHigh = false
+        var hasMedium = false
+        
+        for message in messages {
+            if let priority = message.priority {
+                if priority == .high {
+                    hasHigh = true
+                    break // High is the highest, can return immediately
+                } else if priority == .medium {
+                    hasMedium = true
+                }
+            }
+        }
+        
+        if hasHigh {
+            return .high
+        } else if hasMedium {
+            return .medium
+        } else {
+            return nil
+        }
+    }
+    
+    /// Analyze a message with AI backend and update Firestore with detected priority
+    /// - Parameters:
+    ///   - message: The message to analyze
+    ///   - conversationId: The conversation ID containing the message
+    private func analyzeAndUpdateMessage(_ message: Message, conversationId: String) async {
+        do {
+            let analysis = try await aiBackendService.analyzeMessage(
+                messageId: message.messageId,
+                text: message.text,
+                userId: message.senderId,
+                conversationId: conversationId
+            )
+            
+            // If priority detected, update Firestore
+            if analysis.priority.detected {
+                let priority: Priority = analysis.priority.level == "high" ? .high : .medium
+                
+                try await firestoreService.updateMessagePriority(
+                    conversationId: conversationId,
+                    messageId: message.messageId,
+                    priority: priority
+                )
+            }
+        } catch {
+            // Silent failure - priority is a nice-to-have feature
+            logger.debug("AI analysis failed for message \(message.messageId): \(error.localizedDescription)")
+        }
+    }
+    
+    /// Stop all priority listeners (cleanup)
+    private func stopAllPriorityListeners() {
+        logger.info("Stopping all priority listeners (\(self.activePriorityListeners.count) active)")
+        
+        for (_, task) in activePriorityListeners {
+            task.cancel()
+        }
+        
+        activePriorityListeners.removeAll()
+        conversationPriorityMap.removeAll()
+    }
+    
     // MARK: - Cleanup
     
     deinit {
@@ -371,6 +578,11 @@ final class ConversationListViewModel: ObservableObject {
                 .child(userId)
                 .child("presence")
                 .removeObserver(withHandle: handle)
+        }
+        
+        // Stop all priority listeners (Story 5.3)
+        for (_, task) in activePriorityListeners {
+            task.cancel()
         }
     }
 }

@@ -215,6 +215,7 @@ struct ConversationListView: View {
                 )
             }
             .listRowSeparator(.visible)
+            .listRowBackground(priorityBackground(for: conversation))  // Story 5.3 AC3
             .accessibilityLabel(conversationAccessibilityLabel(for: conversation))
             .accessibilityHint("Tap to open conversation")
             .onAppear {
@@ -225,6 +226,9 @@ struct ConversationListView: View {
                         viewModel.startPresenceListener(for: otherUserId)
                     }
                 }
+                
+                // Start priority listener when row becomes visible (Story 5.3)
+                viewModel.startPriorityListener(for: conversation.conversationId)
             }
             .onDisappear {
                 // Stop presence listener when row disappears (1:1 only)
@@ -234,9 +238,28 @@ struct ConversationListView: View {
                         viewModel.stopPresenceListener(for: otherUserId)
                     }
                 }
+                
+                // NOTE: We do NOT stop priority listeners here because we want them
+                // to continue running even when the row is off-screen or when the user
+                // navigates to a chat. This ensures unread counts stay accurate.
+                // Priority listeners are stopped in ConversationListViewModel.onDisappear()
             }
         }
         .listStyle(.plain)
+    }
+    
+    /// Get priority background color for conversation (Story 5.3 AC3)
+    private func priorityBackground(for conversation: Conversation) -> Color {
+        guard let priority = viewModel.conversationPriorityMap[conversation.conversationId] else {
+            return Color.clear
+        }
+        
+        switch priority {
+        case .medium:
+            return Color.yellow.opacity(0.1)
+        case .high:
+            return Color.red.opacity(0.1)
+        }
     }
     
     /// Get presence status for a conversation (nil for groups or not loaded)
@@ -275,6 +298,11 @@ struct ConversationRow: View {
     let currentUserId: String
     let isOnline: Bool?  // Optional: nil for group chats or when not loaded
     
+    /// Check if conversation has unread messages
+    private var hasUnreadMessages: Bool {
+        conversation.unreadCount > 0
+    }
+    
     var body: some View {
         HStack(spacing: 12) {
             // Avatar with presence indicator (group icon for groups, initials for 1:1)
@@ -292,12 +320,19 @@ struct ConversationRow: View {
                         }
                         
                         Text(displayName)
-                            .font(.system(size: 17, weight: .semibold))
+                            .font(.system(size: 17, weight: hasUnreadMessages ? .bold : .semibold))
                             .foregroundStyle(.primary)
                             .lineLimit(1)
                     }
                     
                     Spacer()
+                    
+                    // Unread badge
+                    if hasUnreadMessages {
+                        Circle()
+                            .fill(Color.blue)
+                            .frame(width: 10, height: 10)
+                    }
                     
                     // Timestamp
                     Text(DateFormatters.shared.formatConversationTimestamp(conversation.lastMessageTimestamp))

@@ -324,6 +324,54 @@ class FirestoreService: ObservableObject {
     }
 
     // MARK: - Message Methods
+    
+    /// Fetch messages for a conversation (one-time fetch, not a listener)
+    /// - Parameter conversationId: The conversation's unique identifier
+    /// - Returns: Array of messages ordered chronologically
+    /// - Throws: FirestoreError if the operation fails
+    open func fetchMessages(conversationId: String) async throws -> [Message] {
+        logger.info("Fetching messages for conversationId: \(conversationId)")
+        
+        let snapshot = try await db.collection("conversations")
+            .document(conversationId)
+            .collection("messages")
+            .order(by: "timestamp", descending: false)  // Oldest first (chronological)
+            .getDocuments()
+        
+        let messages = snapshot.documents.compactMap { doc -> Message? in
+            guard let messageId = doc.data()["messageId"] as? String,
+                let senderId = doc.data()["senderId"] as? String,
+                let text = doc.data()["text"] as? String,
+                let timestamp = (doc.data()["timestamp"] as? Timestamp)?.dateValue(),
+                let status = doc.data()["status"] as? String
+            else {
+                self.logger.warning("Failed to parse message document: \(doc.documentID)")
+                return nil
+            }
+            
+            let readBy = doc.data()["readBy"] as? [String] ?? []
+            
+            // Parse priority field (Story 5.3)
+            var priority: Priority? = nil
+            if let priorityString = doc.data()["priority"] as? String {
+                priority = Priority(rawValue: priorityString)
+            }
+            
+            return Message(
+                id: messageId,
+                messageId: messageId,
+                senderId: senderId,
+                text: text,
+                timestamp: timestamp,
+                status: status,
+                readBy: readBy,
+                priority: priority
+            )
+        }
+        
+        logger.info("Fetched \(messages.count) messages for conversationId: \(conversationId)")
+        return messages
+    }
 
     /// Listen to messages in a conversation with real-time updates
     /// - Parameter conversationId: The conversation's unique identifier
@@ -370,6 +418,12 @@ class FirestoreService: ObservableObject {
                         }
 
                         let readBy = doc.data()["readBy"] as? [String] ?? []
+                        
+                        // Parse priority field (Story 5.3)
+                        var priority: Priority? = nil
+                        if let priorityString = doc.data()["priority"] as? String {
+                            priority = Priority(rawValue: priorityString)
+                        }
 
                         return Message(
                             id: messageId,
@@ -378,7 +432,8 @@ class FirestoreService: ObservableObject {
                             text: text,
                             timestamp: timestamp,
                             status: status,
-                            readBy: readBy
+                            readBy: readBy,
+                            priority: priority
                         )
                     }
 
@@ -657,6 +712,33 @@ class FirestoreService: ObservableObject {
 
         } catch {
             logger.error("Failed to mark message as read: \(error.localizedDescription)")
+            throw FirestoreError.writeFailed(error.localizedDescription)
+        }
+    }
+
+    /// Update message priority (Story 5.3)
+    /// - Parameters:
+    ///   - conversationId: The conversation's unique identifier
+    ///   - messageId: The message's unique identifier
+    ///   - priority: The priority level to set (medium or high)
+    /// - Throws: FirestoreError if the operation fails
+    func updateMessagePriority(conversationId: String, messageId: String, priority: Priority) async throws {
+        logger.info("Updating message priority: \(messageId) to \(priority.rawValue)")
+
+        do {
+            let messageRef = db.collection("conversations")
+                .document(conversationId)
+                .collection("messages")
+                .document(messageId)
+
+            try await messageRef.updateData([
+                "priority": priority.rawValue
+            ])
+
+            logger.info("Message priority updated successfully: \(messageId)")
+
+        } catch {
+            logger.error("Failed to update message priority: \(error.localizedDescription)")
             throw FirestoreError.writeFailed(error.localizedDescription)
         }
     }
