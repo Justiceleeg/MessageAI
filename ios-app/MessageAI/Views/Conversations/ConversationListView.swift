@@ -22,6 +22,7 @@ struct ConversationListView: View {
     @State private var showNewMessage: Bool = false
     @State private var showNewGroupChat: Bool = false
     @State private var showGlobalDecisions: Bool = false  // NEW - Story 5.2 AC6
+    @State private var showCalendar: Bool = false  // NEW - Story 5.1.5
     @State private var navigationPath = NavigationPath()
     @State private var pendingNavigationConversationId: String?
     
@@ -85,6 +86,18 @@ struct ConversationListView: View {
                     .accessibilityHint("Open settings and account options")
                 }
                 
+                // Calendar button (Story 5.1.5)
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: {
+                        showCalendar = true
+                    }) {
+                        Image(systemName: "calendar")
+                            .foregroundStyle(.blue)
+                    }
+                    .accessibilityLabel("Calendar")
+                    .accessibilityHint("View events and reminders")
+                }
+                
                 // Global Decisions button (Story 5.2 AC6)
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: {
@@ -142,6 +155,11 @@ struct ConversationListView: View {
                 NavigationStack {
                     DecisionsListView(conversationId: nil)
                 }
+            }
+            .sheet(isPresented: $showCalendar) {
+                // Calendar View (Story 5.1.5)
+                CalendarView()
+                    .environmentObject(authViewModel)
             }
             .alert("Error", isPresented: .constant(viewModel.errorMessage != nil)) {
                 Button("OK") {

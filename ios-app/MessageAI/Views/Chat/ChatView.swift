@@ -42,6 +42,7 @@ struct ChatView: View {
     @State private var selectedDecisionData: DecisionDetection?
     
     @State private var showPerChatDecisions = false  // NEW - Story 5.2 AC5
+    @State private var showCalendar = false  // NEW - Story 5.1.5
     
     // MARK: - Initialization
     
@@ -121,6 +122,18 @@ struct ChatView: View {
                 }
             }
             
+            // Calendar button (Story 5.1.5)
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button(action: {
+                    showCalendar = true
+                }) {
+                    Image(systemName: "calendar")
+                        .foregroundStyle(.blue)
+                }
+                .accessibilityLabel("Calendar")
+                .accessibilityHint("View events and reminders")
+            }
+            
             // Per-Chat Decisions button (Story 5.2 AC5)
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button(action: {
@@ -192,6 +205,13 @@ struct ChatView: View {
                 NavigationStack {
                     DecisionsListView(conversationId: conversationId)
                 }
+            }
+        }
+        .sheet(isPresented: $showCalendar) {
+            // Calendar & Reminders View (Story 5.1.5)
+            // Filter to show only events/reminders from this conversation
+            NavigationStack {
+                CalendarView(conversationId: conversationId)
             }
         }
     }

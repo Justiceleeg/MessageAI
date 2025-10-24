@@ -475,7 +475,7 @@ final class ConversationListViewModel: ObservableObject {
             }
             
             // Task ended - remove from active listeners
-            await MainActor.run {
+            _ = await MainActor.run {
                 self.activePriorityListeners.removeValue(forKey: conversationId)
             }
         }

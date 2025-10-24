@@ -180,13 +180,9 @@ class VectorStoreService:
         Returns:
             List of similar events with content, metadata, and similarity scores
         """
-        # Generate embedding for the query
-        query_embedding = self.embeddings.embed_query(query)
-        
-        # Use similarity_search_with_score_by_vector for consistency
-        # (LangChain's similarity_search has issues with Pinecone serverless)
-        results = self.events_store.similarity_search_with_score_by_vector(
-            embedding=query_embedding,
+        # Use similarity_search_with_score (correct method for PineconeVectorStore)
+        results = self.events_store.similarity_search_with_score(
+            query=query,
             k=k,
             filter=filter_dict
         )

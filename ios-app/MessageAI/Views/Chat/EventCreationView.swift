@@ -33,6 +33,7 @@ struct EventCreationView: View {
     // Services
     private let eventService = EventService()
     private let aiBackendService = AIBackendService.shared
+    private let firestoreService = FirestoreService()
     
     // Callbacks
     let onEventCreated: (Event) -> Void
@@ -180,6 +181,15 @@ struct EventCreationView: View {
                 throw NSError(domain: "EventCreation", code: 500, userInfo: [NSLocalizedDescriptionKey: "No event ID returned"])
             }
             
+            // Get conversation to find all participants
+            let conversation = try await firestoreService.getConversation(conversationId: conversationId)
+            
+            // Create attendees dictionary with all OTHER participants (not the creator)
+            var attendees: [String: Attendee] = [:]
+            for participantId in conversation.participants where participantId != userId {
+                attendees[participantId] = Attendee(status: .pending)
+            }
+            
             let newEvent = Event(
                 eventId: eventId,
                 title: title,
@@ -191,7 +201,7 @@ struct EventCreationView: View {
                 createdInConversationId: conversationId,
                 createdAtMessageId: messageId,
                 invitations: [:],
-                attendees: [userId: Attendee(status: .pending, rsvpAt: Date())]
+                attendees: attendees
             )
             
             // Save to Firestore
