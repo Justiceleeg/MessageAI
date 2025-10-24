@@ -38,7 +38,10 @@ This epic introduces AI-powered capabilities to MessageAI using a Python backend
 - **Vector Database:** Pinecone for semantic search and embeddings
 - **LLM:** OpenAI GPT-4o-mini for analysis, text-embedding-3-small for vectors
 - **iOS Integration:** REST API calls from Swift to Python backend
-- **Storage:** Hybrid approach - Events in Firestore, Reminders/Decisions in Pinecone + Firestore
+- **Storage:** Hybrid approach with consistent pattern:
+  - **iOS Services:** Handle all Firestore CRUD operations (Events, Reminders, Decisions)
+  - **Backend:** Only handles Pinecone vector storage for semantic search
+  - **No Firebase Admin SDK** required on backend (cleaner separation)
 
 ### Key Technologies
 - LangChain for RAG chains and agent-based reasoning
@@ -76,7 +79,8 @@ This epic introduces AI-powered capabilities to MessageAI using a Python backend
 
 ### Story 5.0: Python Backend Foundation
 **Effort:** 1 day  
-**Value:** Critical infrastructure
+**Value:** Critical infrastructure  
+**Status:** ✅ Done
 
 Sets up Python backend with FastAPI, LangChain, and Pinecone integration:
 - FastAPI application structure
@@ -91,9 +95,27 @@ Sets up Python backend with FastAPI, LangChain, and Pinecone integration:
 
 ---
 
+### Story 5.0.5: iOS Data Models & Services Foundation
+**Effort:** 0.4 days  
+**Value:** Critical infrastructure  
+**Status:** ✅ Done
+
+Create Swift data models and service layers for AI features:
+- Event, Reminder, and Decision models
+- SwiftData entities for local persistence
+- EventService, ReminderService, DecisionService for CRUD operations
+- Firestore synchronization layer
+- Consistent architecture pattern (iOS handles Firestore, Backend handles Pinecone)
+
+**Dependencies:** None  
+**Acceptance Criteria:** See Story 5.0.5 document
+
+---
+
 ### Story 5.1: Smart Calendar Extraction
 **Effort:** 0.5 days  
-**Value:** High - Core feature
+**Value:** High - Core feature  
+**Status:** Not Started
 
 AI detects calendar events in messages and provides one-click creation:
 - Analyze outgoing messages for dates, times, locations
@@ -102,30 +124,51 @@ AI detects calendar events in messages and provides one-click creation:
 - Store events in Firestore with proper schema
 - Generate embeddings and store in Pinecone for deduplication
 
-**Dependencies:** Story 5.0  
+**Dependencies:** Story 5.0, Story 5.0.5  
 **Acceptance Criteria:** See Story 5.1 document
 
 ---
 
-### Story 5.2: Decision Summarization with RAG
-**Effort:** 0.75 days  
-**Value:** High - Unique feature
+### Story 5.1.5: Calendar & Reminders UI
+**Effort:** 0.6 days  
+**Value:** High - Visual interface  
+**Status:** Approved
 
-AI detects decisions and provides RAG-enhanced thread summarization:
-- Detect when decisions are made
+Create visual calendar interface using Mijick CalendarView:
+- Events tab with monthly grid calendar
+- Reminders tab with grouped list view (Today, Tomorrow, This Week, Later)
+- Event detail view with attendee RSVP status
+- Reminder detail view with completion tracking
+- "Jump to Message" navigation for all items
+- Real-time Firestore synchronization
+
+**Dependencies:** Story 5.0.5, Story 5.1  
+**Acceptance Criteria:** See Story 5.1.5 document
+
+---
+
+### Story 5.2: Decision Detection and Tracking
+**Effort:** 0.75 days  
+**Value:** High - Unique feature  
+**Status:** ✅ Done
+
+AI detects decisions using lightweight RAG for context:
+- Retrieve recent conversation context from Pinecone (k=5 messages)
+- Analyze with GPT-4o-mini for complete, contextual decision statements
 - Store decisions with embeddings in Pinecone
 - Provide Decisions view (per-chat and global)
-- RAG-powered thread summarization using vector search
+- Semantic decision search
 - Navigate to source message from decision
 
-**Dependencies:** Story 5.0  
+**Dependencies:** Story 5.0, Story 5.0.5  
 **Acceptance Criteria:** See Story 5.2 document
 
 ---
 
 ### Story 5.3: Priority Message Highlighting
 **Effort:** 0.25 days  
-**Value:** Medium - Simple but useful
+**Value:** Medium - Simple but useful  
+**Status:** Not Started
 
 AI classifies message urgency automatically:
 - Analyze incoming messages for urgency indicators
@@ -140,7 +183,8 @@ AI classifies message urgency automatically:
 
 ### Story 5.4: RSVP Tracking
 **Effort:** 0.75 days  
-**Value:** High - Social coordination
+**Value:** High - Social coordination  
+**Status:** Not Started
 
 AI detects invitations and RSVPs for event management:
 - Detect "create event and invite" intent
@@ -149,30 +193,32 @@ AI detects invitations and RSVPs for event management:
 - Track attendees and RSVP status
 - Calendar view integration
 
-**Dependencies:** Story 5.0, Story 5.1  
+**Dependencies:** Story 5.0, Story 5.0.5, Story 5.1, Story 5.1.5  
 **Acceptance Criteria:** See Story 5.4 document
 
 ---
 
 ### Story 5.5: Deadline/Reminder Extraction
 **Effort:** 0.5 days  
-**Value:** High - Practical utility
+**Value:** High - Practical utility  
+**Status:** Not Started
 
 AI extracts commitments and schedules reminders:
 - Detect commitment language in messages
 - Display "⏰ Set reminder?" prompt
 - Schedule local notifications via UNUserNotificationCenter
-- Store reminders with embeddings in Pinecone
-- Reminders view (per-chat and global)
+- Store reminders with embeddings in Pinecone (vector-only backend)
+- Per-chat reminders view (global view in Story 5.1.5)
 
-**Dependencies:** Story 5.0  
+**Dependencies:** Story 5.0, Story 5.0.5, Story 5.1.5  
 **Acceptance Criteria:** See Story 5.5 document
 
 ---
 
 ### Story 5.6: Proactive Assistant with LangChain
 **Effort:** 0.75 days  
-**Value:** High - AI showcase feature
+**Value:** High - AI showcase feature  
+**Status:** Not Started
 
 LangChain agent provides proactive scheduling assistance:
 - Detect scheduling intent in messages
@@ -193,25 +239,56 @@ LangChain agent provides proactive scheduling assistance:
 - **Architecture Briefing:** `docs/architecture/ai-features-briefing.md`
 
 ### Key Implementation Phases
-1. **Day 1:** Backend foundation + Basic analysis (Stories 5.0, 5.1)
-2. **Day 2:** RAG + Event features (Stories 5.2, 5.4)
-3. **Day 3:** Reminders + Priority + Agent (Stories 5.3, 5.5, 5.6)
-4. **Day 4:** Integration, polish, deployment, testing
+1. **Foundation (Completed):** Backend + iOS foundation (Stories 5.0, 5.0.5, 5.2)
+2. **Day 1-2:** Calendar features (Stories 5.1, 5.1.5)
+3. **Day 2-3:** RSVP + Reminders (Stories 5.4, 5.5)
+4. **Day 3-4:** Priority + Agent (Stories 5.3, 5.6)
+5. **Day 4:** Integration, polish, deployment, testing
+
+### Architecture Pattern (Established in Stories 5.0.5 & 5.2)
+
+All AI features follow a **consistent storage pattern**:
+
+**iOS Client (Swift):**
+- EventService, ReminderService, DecisionService handle Firestore CRUD
+- Full control over data models and persistence
+- Offline support via local SwiftData cache
+
+**Python Backend (FastAPI + LangChain):**
+- Only handles Pinecone vector storage (`POST /[type]/vector`, `DELETE /[type]/vector/{id}`)
+- Provides semantic search endpoints (`GET /[type]/search`)
+- No Firebase Admin SDK needed
+
+**Why this pattern?**
+- Clean separation of concerns
+- iOS owns user data (Firestore)
+- Backend specializes in AI/ML operations (Pinecone)
+- Simpler backend deployment (no Firebase credentials needed)
+- Consistent across Events, Reminders, Decisions
 
 ### New iOS Components
-- `AIBackendService.swift` - HTTP client for Python backend
-- `ReminderService.swift` - Reminder management
-- `DecisionService.swift` - Decision management
-- Updated: `EventService.swift` - Enhanced event management
+- `AIBackendService.swift` - HTTP client for Python backend (semantic search only)
+- `EventService.swift` - Event CRUD + Firestore sync (from Story 5.0.5)
+- `ReminderService.swift` - Reminder CRUD + Firestore sync (from Story 5.0.5)
+- `DecisionService.swift` - Decision CRUD + Firestore sync (from Story 5.0.5)
+- `CalendarView.swift` - Visual calendar using Mijick CalendarView (Story 5.1.5)
 
 ### New Python Backend Structure
 ```
 python-backend/
 ├── app/
 │   ├── main.py (FastAPI app)
-│   ├── routes/ (API endpoints)
-│   ├── services/ (Business logic)
-│   └── models/ (Data models)
+│   ├── routes/
+│   │   ├── analysis.py (message analysis)
+│   │   ├── events.py (/events/vector, /events/search)
+│   │   ├── reminders.py (/reminders/vector, /reminders/search)
+│   │   ├── decisions.py (/decisions/vector, /decisions/search)
+│   │   └── agent.py (LangChain proactive assistant)
+│   ├── services/
+│   │   ├── vector_store.py (Pinecone + LangChain)
+│   │   ├── openai_service.py (OpenAI API wrapper)
+│   │   └── agent_service.py (LangChain agents)
+│   └── models/ (Pydantic request/response models)
 ├── requirements.txt
 └── .env (gitignored)
 ```
