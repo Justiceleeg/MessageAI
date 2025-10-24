@@ -147,6 +147,23 @@ Create visual calendar interface using Mijick CalendarView:
 
 ---
 
+### Story 5.1.6: Message Linking Navigation
+**Effort:** 0.4 days  
+**Value:** High - User trust & context  
+**Status:** Not Started
+
+Implement navigation from events, reminders, and decisions back to source messages:
+- Add "Jump to Message" buttons to EventDetailView, ReminderDetailView, DecisionDetailView
+- Navigate to conversation and scroll to specific message
+- Highlight target message with temporary visual effect
+- Handle edge cases (deleted messages, missing conversations)
+- Maintain proper navigation state and back button flow
+
+**Dependencies:** Story 5.0.5, Story 5.1.5, Story 5.2  
+**Acceptance Criteria:** See Story 5.1.6 document
+
+---
+
 ### Story 5.2: Decision Detection and Tracking
 **Effort:** 0.75 days  
 **Value:** High - Unique feature  

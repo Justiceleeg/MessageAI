@@ -196,11 +196,9 @@ struct DecisionRowView: View {
                 
                 Spacer()
                 
-                // Show "Go to message" button (Story 5.1.5 deferred)
+                // Show "Go to message" button (Story 5.1.6)
                 Button(action: {
-                    // TODO: Navigate to message (Story 5.1.5)
-                    print("📍 Navigate to message: \(decision.sourceMessageId) in conversation: \(decision.conversationId)")
-                    // This will be implemented in Story 5.1.5
+                    navigateToMessage()
                 }) {
                     HStack(spacing: 4) {
                         Image(systemName: "arrowshape.turn.up.right")
@@ -211,8 +209,6 @@ struct DecisionRowView: View {
                     .foregroundColor(.blue)
                 }
                 .buttonStyle(.bordered)
-                .disabled(true)  // Disabled until Story 5.1.5
-                .opacity(0.5)    // Visual feedback that it's disabled
             }
         }
         .padding(.vertical, 4)
@@ -222,6 +218,21 @@ struct DecisionRowView: View {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
         return formatter.localizedString(for: timestamp, relativeTo: Date())
+    }
+    
+    // MARK: - Navigation (Story 5.1.6)
+    
+    private func navigateToMessage() {
+        // Post notification to navigate to conversation with message highlighting
+        // No dismissal needed here since DecisionsListView is not a sheet
+        NotificationCenter.default.post(
+            name: .navigateToConversationWithMessage,
+            object: nil,
+            userInfo: [
+                "conversationId": decision.conversationId,
+                "messageId": decision.sourceMessageId
+            ]
+        )
     }
 }
 

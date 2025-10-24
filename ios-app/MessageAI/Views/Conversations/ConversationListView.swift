@@ -25,6 +25,7 @@ struct ConversationListView: View {
     @State private var showCalendar: Bool = false  // NEW - Story 5.1.5
     @State private var navigationPath = NavigationPath()
     @State private var pendingNavigationConversationId: String?
+    @State private var pendingNavigationMessageId: String?
     
     // Store service references for UserSearchView
     private let firestoreService: FirestoreService
@@ -64,10 +65,23 @@ struct ConversationListView: View {
                 // Navigate to conversation when tapped from notification (Story 3.4)
                 if let conversation = viewModel.conversations.first(where: { $0.conversationId == conversationId }) {
                     let otherUserId = viewModel.getOtherParticipantId(for: conversation)
+                    
+                    // Check if this is a navigation with message highlighting (Story 5.1.6)
+                    let highlightMessageId = (pendingNavigationConversationId == conversationId) ? 
+                        pendingNavigationMessageId : nil
+                    
                     ChatView(
                         conversationId: conversationId,
-                        otherUserId: otherUserId
+                        otherUserId: otherUserId,
+                        highlightMessageId: highlightMessageId
                     )
+                    .onAppear {
+                        // Clear pending navigation after use
+                        if pendingNavigationConversationId == conversationId {
+                            pendingNavigationConversationId = nil
+                            pendingNavigationMessageId = nil
+                        }
+                    }
                 } else {
                     // Conversation not found in list, show error
                     Text("Conversation not found")
@@ -103,7 +117,7 @@ struct ConversationListView: View {
                     Button(action: {
                         showGlobalDecisions = true
                     }) {
-                        Image(systemName: "checkmark.circle.fill")
+                        Image(systemName: "checkmark.circle")
                             .foregroundStyle(.green)
                     }
                     .accessibilityLabel("All Decisions")
@@ -182,6 +196,30 @@ struct ConversationListView: View {
                 // Handle navigation from notification tap (Story 3.4)
                 if let conversationId = notification.userInfo?["conversationId"] as? String {
                     print("📱 ConversationListView: Navigating to conversation from notification: \(conversationId)")
+                    navigationPath.append(conversationId)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .navigateToConversationWithMessage)) { notification in
+                // Handle navigation with message highlighting (Story 5.1.6)
+                if let conversationId = notification.userInfo?["conversationId"] as? String,
+                   let messageId = notification.userInfo?["messageId"] as? String {
+                    print("📱 ConversationListView: Navigating to conversation with message highlight: \(conversationId), message: \(messageId)")
+                    
+                    // Check if conversation exists
+                    guard viewModel.conversations.contains(where: { $0.conversationId == conversationId }) else {
+                        print("⚠️ ConversationListView: Conversation \(conversationId) not found")
+                        // Could show an alert here if needed
+                        return
+                    }
+                    
+                    // Dismiss any open sheets first
+                    showCalendar = false
+                    showGlobalDecisions = false
+                    
+                    // Store the message ID for highlighting
+                    pendingNavigationConversationId = conversationId
+                    pendingNavigationMessageId = messageId
+                    // Navigate to conversation
                     navigationPath.append(conversationId)
                 }
             }

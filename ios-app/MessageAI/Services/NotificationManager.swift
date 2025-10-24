@@ -474,5 +474,8 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
 extension Notification.Name {
     /// Posted when user taps a notification to navigate to a conversation
     static let navigateToConversation = Notification.Name("navigateToConversation")
+    
+    /// Posted when user wants to navigate to a conversation and highlight a specific message (Story 5.1.6)
+    static let navigateToConversationWithMessage = Notification.Name("navigateToConversationWithMessage")
 }
 

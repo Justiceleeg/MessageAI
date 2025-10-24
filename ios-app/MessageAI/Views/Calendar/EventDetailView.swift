@@ -17,7 +17,7 @@ struct EventDetailView: View {
     
     @Environment(\.dismiss) private var dismiss
     @State private var showDeleteConfirmation = false
-    @State private var navigateToMessage = false
+    @State private var shouldNavigateToMessage = false
     
     // Data fetching
     @State private var creatorName: String = "Loading..."
@@ -170,8 +170,7 @@ struct EventDetailView: View {
         VStack(spacing: 12) {
             // Jump to Message button
             Button {
-                // TODO: Implement navigation to message
-                // This requires navigation coordination
+                navigateToMessage()
             } label: {
                 Label("Jump to Message", systemImage: "arrow.right.circle.fill")
                     .frame(maxWidth: .infinity)
@@ -278,6 +277,26 @@ struct EventDetailView: View {
         formatter.dateStyle = .long
         formatter.timeStyle = .none
         return formatter.string(from: event.date)
+    }
+    
+    // MARK: - Navigation (Story 5.1.6)
+    
+    private func navigateToMessage() {
+        // Dismiss this sheet first so the conversation can be seen
+        dismiss()
+        
+        // Post notification to navigate to conversation with message highlighting
+        // Use a small delay to ensure the sheet is dismissed first
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            NotificationCenter.default.post(
+                name: .navigateToConversationWithMessage,
+                object: nil,
+                userInfo: [
+                    "conversationId": event.createdInConversationId,
+                    "messageId": event.createdAtMessageId
+                ]
+            )
+        }
     }
 }
 

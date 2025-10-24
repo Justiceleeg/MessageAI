@@ -144,8 +144,7 @@ struct ReminderDetailView: View {
         VStack(spacing: 12) {
             // Jump to Message button
             Button {
-                // TODO: Implement navigation to message
-                // This requires navigation coordination
+                navigateToMessage()
             } label: {
                 Label("Jump to Message", systemImage: "arrow.right.circle.fill")
                     .frame(maxWidth: .infinity)
@@ -239,6 +238,26 @@ struct ReminderDetailView: View {
     
     private var isOverdue: Bool {
         reminder.dueDate < Date()
+    }
+    
+    // MARK: - Navigation (Story 5.1.6)
+    
+    private func navigateToMessage() {
+        // Dismiss this sheet first so the conversation can be seen
+        dismiss()
+        
+        // Post notification to navigate to conversation with message highlighting
+        // Use a small delay to ensure the sheet is dismissed first
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            NotificationCenter.default.post(
+                name: .navigateToConversationWithMessage,
+                object: nil,
+                userInfo: [
+                    "conversationId": reminder.conversationId,
+                    "messageId": reminder.sourceMessageId
+                ]
+            )
+        }
     }
 }
 

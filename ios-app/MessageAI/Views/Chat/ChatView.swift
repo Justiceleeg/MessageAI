@@ -25,6 +25,9 @@ struct ChatView: View {
     /// Group name (optional, for group chats)
     let groupName: String?
     
+    /// Message ID to highlight when view appears (for navigation from events/reminders/decisions)
+    let highlightMessageId: String?
+    
     @StateObject private var viewModel: ChatViewModel
     @Environment(\.dismiss) private var dismiss
     @Environment(NotificationManager.self) private var notificationManager
@@ -44,13 +47,17 @@ struct ChatView: View {
     @State private var showPerChatDecisions = false  // NEW - Story 5.2 AC5
     @State private var showCalendar = false  // NEW - Story 5.1.5
     
+    // Message highlighting state (Story 5.1.6)
+    @State private var highlightedMessageId: String? = nil
+    
     // MARK: - Initialization
     
-    init(conversationId: String?, otherUserId: String, groupParticipants: [User]? = nil, groupName: String? = nil) {
+    init(conversationId: String?, otherUserId: String, groupParticipants: [User]? = nil, groupName: String? = nil, highlightMessageId: String? = nil) {
         self.conversationId = conversationId
         self.otherUserId = otherUserId
         self.groupParticipants = groupParticipants
         self.groupName = groupName
+        self.highlightMessageId = highlightMessageId
         
         // Initialize ViewModel with parameters (uses convenience initializer)
         _viewModel = StateObject(wrappedValue: ChatViewModel(
@@ -62,11 +69,12 @@ struct ChatView: View {
     }
     
     // Initializer for testing with custom services
-    init(conversationId: String?, otherUserId: String, viewModel: ChatViewModel) {
+    init(conversationId: String?, otherUserId: String, viewModel: ChatViewModel, highlightMessageId: String? = nil) {
         self.conversationId = conversationId
         self.otherUserId = otherUserId
         self.groupParticipants = nil
         self.groupName = nil
+        self.highlightMessageId = highlightMessageId
         _viewModel = StateObject(wrappedValue: viewModel)
     }
     
@@ -242,19 +250,29 @@ struct ChatView: View {
                         LazyVStack(alignment: .leading, spacing: 8) {
                             ForEach(viewModel.messages) { message in
                                 VStack(alignment: .leading, spacing: 0) {
+                                    let isSentByCurrentUser = viewModel.isSentByCurrentUser(message: message)
+                                    let messageStatus = viewModel.computeMessageStatus(for: message)
+                                    let isGroupChat = viewModel.conversation?.isGroupChat ?? false
+                                    let senderName = !isSentByCurrentUser ? viewModel.getSenderDisplayName(userId: message.senderId) : nil
+                                    let isOnline = viewModel.participantPresence[message.senderId]
+                                    let readCount = viewModel.calculateReadCount(for: message)
+                                    let shouldShowReadReceipt = viewModel.shouldShowReadReceipt(for: message)
+                                    let isHighlighted = highlightedMessageId == message.id
+                                    
                                     MessageBubbleView(
                                         message: message,
-                                        isSentByCurrentUser: viewModel.isSentByCurrentUser(message: message),
-                                        status: viewModel.computeMessageStatus(for: message),
+                                        isSentByCurrentUser: isSentByCurrentUser,
+                                        status: messageStatus,
                                         onRetry: message.status == "failed" ? {
                                             selectedMessageForRetry = message
                                             showRetryActionSheet = true
                                         } : nil,
-                                        isGroupChat: viewModel.conversation?.isGroupChat ?? false,
-                                        senderName: !viewModel.isSentByCurrentUser(message: message) ? viewModel.getSenderDisplayName(userId: message.senderId) : nil,
-                                        isOnline: viewModel.participantPresence[message.senderId],  // Story 3.3: Show online status in group chats
-                                        readCount: viewModel.calculateReadCount(for: message),  // Story 4.1: Read receipt count
-                                        shouldShowReadReceipt: viewModel.shouldShowReadReceipt(for: message)  // Story 4.1: Only show on latest
+                                        isGroupChat: isGroupChat,
+                                        senderName: senderName,
+                                        isOnline: isOnline,
+                                        readCount: readCount,
+                                        shouldShowReadReceipt: shouldShowReadReceipt,
+                                        isHighlighted: isHighlighted
                                     ) {
                                         // AI Prompt (Story 5.1) - Inline with timestamp
                                         // Only show if not dismissed
@@ -321,6 +339,16 @@ struct ChatView: View {
                         if let lastMessage = viewModel.messages.last {
                             scrollProxy.scrollTo(lastMessage.id, anchor: .top)
                         }
+                        
+                        // Handle message highlighting (Story 5.1.6)
+                        if let messageId = highlightMessageId {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                withAnimation(.easeInOut(duration: 0.5)) {
+                                    scrollProxy.scrollTo(messageId, anchor: .center)
+                                }
+                                scrollToMessage(messageId: messageId)
+                            }
+                        }
                     }
                 }
             }
@@ -384,6 +412,33 @@ struct ChatView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(uiColor: .systemGroupedBackground))
+    }
+    
+    // MARK: - Message Highlighting (Story 5.1.6)
+    
+    private func scrollToMessage(messageId: String) {
+        // Check if message exists in the current messages
+        guard viewModel.messages.contains(where: { $0.id == messageId }) else {
+            print("⚠️ ChatView: Message \(messageId) not found in current messages")
+            // Could show an alert here if needed
+            return
+        }
+        
+        // Highlight the message (scrolling will be handled by the ScrollViewReader in the view)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            highlightMessage(messageId)
+        }
+    }
+    
+    private func highlightMessage(_ messageId: String) {
+        highlightedMessageId = messageId
+        
+        // Remove highlight after 3 seconds
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            withAnimation(.easeOut(duration: 0.5)) {
+                highlightedMessageId = nil
+            }
+        }
     }
 }
 

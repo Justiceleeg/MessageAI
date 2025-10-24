@@ -20,6 +20,7 @@ struct MessageBubbleView<AIPrompt: View>: View {
     let readCount: Int  // Number of users who have read this message (Story 4.1)
     let shouldShowReadReceipt: Bool  // Whether to show read receipt on this message (Story 4.1 UX)
     let aiPrompt: AIPrompt?  // Optional AI prompt view (Story 5.1)
+    let isHighlighted: Bool  // Whether this message should be highlighted (Story 5.1.6)
     
     // MARK: - Initialization
     
@@ -33,6 +34,7 @@ struct MessageBubbleView<AIPrompt: View>: View {
         isOnline: Bool? = nil,
         readCount: Int = 0,
         shouldShowReadReceipt: Bool = false,
+        isHighlighted: Bool = false,
         @ViewBuilder aiPrompt: () -> AIPrompt? = { nil }
     ) {
         self.message = message
@@ -44,6 +46,7 @@ struct MessageBubbleView<AIPrompt: View>: View {
         self.isOnline = isOnline
         self.readCount = readCount
         self.shouldShowReadReceipt = shouldShowReadReceipt
+        self.isHighlighted = isHighlighted
         self.aiPrompt = aiPrompt()
     }
     
@@ -116,6 +119,11 @@ struct MessageBubbleView<AIPrompt: View>: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 2)
+        .background(
+            // Highlight background (Story 5.1.6)
+            isHighlighted ? Color.yellow.opacity(0.3) : Color.clear
+        )
+        .animation(.easeInOut(duration: 0.3), value: isHighlighted)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityLabel)
         .onTapGesture {
