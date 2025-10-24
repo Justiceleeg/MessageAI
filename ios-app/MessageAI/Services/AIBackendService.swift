@@ -210,6 +210,52 @@ class AIBackendService {
         
         return try await post(endpoint: "/api/v1/events/search", body: request)
     }
+    
+    // MARK: - Decision Management (Story 5.2)
+    
+    /// Search decisions semantically using Pinecone
+    /// - Parameters:
+    ///   - userId: User ID for filtering results
+    ///   - query: Search query
+    ///   - conversationId: Optional conversation ID filter
+    ///   - k: Number of results to return (default 10)
+    /// - Returns: DecisionSearchResponse with similar decisions
+    /// - Throws: AIBackendError if request fails
+    func searchDecisions(
+        userId: String,
+        query: String,
+        conversationId: String? = nil,
+        k: Int = 10
+    ) async throws -> DecisionSearchResponse {
+        var urlComponents = URLComponents(string: "\(baseURL)/api/v1/decisions/search")!
+        urlComponents.queryItems = [
+            URLQueryItem(name: "user_id", value: userId),
+            URLQueryItem(name: "query", value: query),
+            URLQueryItem(name: "k", value: "\(k)")
+        ]
+        if let conversationId = conversationId {
+            urlComponents.queryItems?.append(URLQueryItem(name: "conversation_id", value: conversationId))
+        }
+        
+        guard let url = urlComponents.url else {
+            throw AIBackendError.invalidURL
+        }
+        
+        let (data, response) = try await session.data(from: url)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AIBackendError.invalidResponse
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            throw AIBackendError.httpError(statusCode: httpResponse.statusCode)
+        }
+        
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        
+        return try decoder.decode(DecisionSearchResponse.self, from: data)
+    }
 }
 
 // MARK: - Response Models
@@ -351,6 +397,23 @@ struct EventSearchResult: Codable {
     let similarity: Double
 }
 
+// MARK: - Decision Response Models (Story 5.2)
+
+/// Decision search response
+struct DecisionSearchResponse: Codable {
+    let results: [DecisionSearchResult]
+}
+
+/// Decision search result
+struct DecisionSearchResult: Codable {
+    let decisionId: String
+    let text: String
+    let conversationId: String
+    let messageId: String
+    let timestamp: String
+    let similarity: Double
+}
+
 // MARK: - Error Types
 
 /// Errors that can occur when communicating with the AI backend
@@ -376,11 +439,3 @@ enum AIBackendError: LocalizedError {
         }
     }
 }
-
-// MARK: - Singleton (Optional)
-
-extension AIBackendService {
-    /// Shared instance for convenience (optional pattern)
-    static let shared = AIBackendService()
-}
-

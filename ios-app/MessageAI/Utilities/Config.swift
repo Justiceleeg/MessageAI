@@ -14,7 +14,7 @@ enum Config {
     /// Backend URL based on build configuration
     static var backendURL: String {
         // First, try to get from Info.plist (set via xcconfig)
-        if let urlString = Bundle.main.object(forInfoKey: "AI_BACKEND_URL") as? String,
+        if let urlString = Bundle.main.object(forInfoDictionaryKey: "AI_BACKEND_URL") as? String,
            !urlString.isEmpty {
             return urlString
         }

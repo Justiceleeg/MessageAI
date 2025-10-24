@@ -21,6 +21,7 @@ struct ConversationListView: View {
     @State private var showSettings: Bool = false
     @State private var showNewMessage: Bool = false
     @State private var showNewGroupChat: Bool = false
+    @State private var showGlobalDecisions: Bool = false  // NEW - Story 5.2 AC6
     @State private var navigationPath = NavigationPath()
     @State private var pendingNavigationConversationId: String?
     
@@ -84,6 +85,18 @@ struct ConversationListView: View {
                     .accessibilityHint("Open settings and account options")
                 }
                 
+                // Global Decisions button (Story 5.2 AC6)
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: {
+                        showGlobalDecisions = true
+                    }) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    }
+                    .accessibilityLabel("All Decisions")
+                    .accessibilityHint("View all decisions across conversations")
+                }
+                
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
                         Button(action: {
@@ -123,6 +136,12 @@ struct ConversationListView: View {
                     authService: authService,
                     isGroupMode: true
                 )
+            }
+            .sheet(isPresented: $showGlobalDecisions) {
+                // Global Decisions View (Story 5.2 AC6)
+                NavigationStack {
+                    DecisionsListView(conversationId: nil)
+                }
             }
             .alert("Error", isPresented: .constant(viewModel.errorMessage != nil)) {
                 Button("OK") {

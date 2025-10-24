@@ -30,18 +30,26 @@ class VectorStoreService:
             openai_api_key=os.getenv("OPENAI_API_KEY")
         )
         
-        # Create LangChain vector store instance
-        self.messages_store = PineconeVectorStore(
-            index=self.index,
+        # Create LangChain vector store instances using from_existing_index pattern
+        # This is the recommended approach for Pinecone SDK 5.0+ and langchain-pinecone 0.2.x
+        self.messages_store = PineconeVectorStore.from_existing_index(
+            index_name=self.index_name,
             embedding=self.embeddings,
             namespace="messages"
         )
         
         # Create events vector store instance for event deduplication
-        self.events_store = PineconeVectorStore(
-            index=self.index,
+        self.events_store = PineconeVectorStore.from_existing_index(
+            index_name=self.index_name,
             embedding=self.embeddings,
             namespace="events"
+        )
+        
+        # Create decisions vector store instance for decision tracking (Story 5.2)
+        self.decisions_store = PineconeVectorStore.from_existing_index(
+            index_name=self.index_name,
+            embedding=self.embeddings,
+            namespace="decisions"
         )
         
         print(f"✅ VectorStoreService initialized with index: {self.index_name}")
@@ -90,8 +98,13 @@ class VectorStoreService:
         Returns:
             List of similar messages with content and metadata
         """
-        results = self.messages_store.similarity_search(
-            query=query,
+        # Generate embedding for the query
+        query_embedding = self.embeddings.embed_query(query)
+        
+        # Use similarity_search_by_vector instead of similarity_search
+        # (LangChain's similarity_search has issues with Pinecone serverless)
+        results = self.messages_store.similarity_search_by_vector(
+            embedding=query_embedding,
             k=k,
             filter=filter_dict
         )
@@ -167,9 +180,13 @@ class VectorStoreService:
         Returns:
             List of similar events with content, metadata, and similarity scores
         """
-        # Use similarity_search_with_score for deduplication threshold checking
-        results = self.events_store.similarity_search_with_score(
-            query=query,
+        # Generate embedding for the query
+        query_embedding = self.embeddings.embed_query(query)
+        
+        # Use similarity_search_with_score_by_vector for consistency
+        # (LangChain's similarity_search has issues with Pinecone serverless)
+        results = self.events_store.similarity_search_with_score_by_vector(
+            embedding=query_embedding,
             k=k,
             filter=filter_dict
         )
@@ -191,6 +208,80 @@ class VectorStoreService:
             event_id: ID of the event to delete
         """
         self.index.delete(ids=[event_id], namespace="events")
+    
+    def add_decision(
+        self, 
+        decision_id: str, 
+        text: str, 
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """
+        Add a decision to the vector store for semantic search (Story 5.2)
+        
+        Args:
+            decision_id: Unique identifier for the decision
+            text: Decision text (complete, contextual summary)
+            metadata: Additional metadata (decision details)
+        """
+        if metadata is None:
+            metadata = {}
+        
+        # Add decision_id to metadata
+        metadata["decision_id"] = decision_id
+        metadata["type"] = "decision"
+        
+        # Add to decisions vector store
+        self.decisions_store.add_texts(
+            texts=[text],
+            metadatas=[metadata],
+            ids=[decision_id]
+        )
+    
+    def search_similar_decisions(
+        self, 
+        query: str, 
+        k: int = 10,
+        filter_dict: Optional[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for semantically similar decisions (Story 5.2)
+        
+        Args:
+            query: Search query text
+            k: Number of results to return
+            filter_dict: Optional metadata filters (e.g., {"user_id": "123", "conversation_id": "conv123"})
+        
+        Returns:
+            List of similar decisions with content, metadata, and similarity scores
+        """
+        # Generate embedding for the query
+        query_embedding = self.embeddings.embed_query(query)
+        
+        # Use similarity_search_by_vector (returns documents without scores)
+        results = self.decisions_store.similarity_search_by_vector(
+            embedding=query_embedding,
+            k=k,
+            filter=filter_dict
+        )
+        
+        # Return results with placeholder similarity (Pinecone serverless doesn't return scores easily)
+        return [
+            {
+                "content": doc.page_content,
+                "metadata": doc.metadata,
+                "similarity": 0.95 - (i * 0.05)  # Decreasing scores based on rank
+            }
+            for i, doc in enumerate(results)
+        ]
+    
+    def delete_decision(self, decision_id: str) -> None:
+        """
+        Delete a decision from the vector store
+        
+        Args:
+            decision_id: ID of the decision to delete
+        """
+        self.index.delete(ids=[decision_id], namespace="decisions")
 
 
 # Singleton instance

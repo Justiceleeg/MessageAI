@@ -16,16 +16,32 @@ async def analyze_message(request: MessageAnalysisRequest):
     """
     Comprehensively analyze a message for events, reminders, decisions, RSVP, priority, and conflicts.
     This is the core endpoint that powers all AI-powered messaging features.
+    
+    Story 5.2: Implements lightweight RAG for context-aware decision detection.
     """
     try:
         # Get services
         openai_service = get_openai_service()
         vector_store = get_vector_store()
         
-        # Analyze message with GPT-4o-mini
+        # Step 1: Retrieve conversation context for RAG (Story 5.2)
+        # This enables context-aware decision detection
+        conversation_context = []
+        try:
+            conversation_context = vector_store.search_similar_messages(
+                query=request.text,
+                k=5,
+                filter_dict={"conversation_id": request.conversation_id}
+            )
+        except Exception as e:
+            print(f"⚠️ Failed to retrieve context: {e}")
+            # Continue without context - analysis will still work
+        
+        # Step 2: Analyze message with GPT-4o-mini (with context if available)
         analysis = openai_service.analyze_message_comprehensive(
             text=request.text,
-            user_calendar=request.user_calendar
+            user_calendar=request.user_calendar,
+            conversation_context=conversation_context  # RAG context
         )
         
         # Generate embedding for the message

@@ -2,7 +2,7 @@
 //  DecisionService.swift
 //  MessageAI
 //
-//  Created by Justice Perez White on 10/23/25.
+//  Service responsible for Decision CRUD operations and Firestore synchronization
 //
 
 import Foundation
@@ -33,6 +33,10 @@ class DecisionService {
             let data = try Firestore.Encoder().encode(decision)
             try await docRef.setData(data)
             logger.info("Decision created successfully: \(decision.decisionId)")
+            
+            // Also store vector embedding in backend for semantic search
+            try await storeDecisionVector(decision)
+            
             return decision
             
         } catch {
@@ -67,50 +71,34 @@ class DecisionService {
         }
     }
     
-    /// Lists all decisions for a user
-    /// - Parameter userId: User ID
-    /// - Returns: Array of decisions
+    /// Lists decisions for a user, optionally filtered by conversation
+    /// - Parameters:
+    ///   - userId: User ID to filter by
+    ///   - conversationId: Optional conversation ID filter
+    ///   - limit: Maximum number of results (default 50)
+    /// - Returns: Array of decisions sorted by timestamp (newest first)
     /// - Throws: Error if fetch fails
-    func listDecisions(userId: String) async throws -> [Decision] {
+    func listDecisions(userId: String, conversationId: String? = nil, limit: Int = 50) async throws -> [Decision] {
         logger.info("Listing decisions for user: \(userId)")
         
         do {
-            let query = db.collection(decisionsCollection)
+            var query: Query = db.collection(decisionsCollection)
                 .whereField("userId", isEqualTo: userId)
-                .order(by: "timestamp", descending: true)
+            
+            if let conversationId = conversationId {
+                query = query.whereField("conversationId", isEqualTo: conversationId)
+            }
+            
+            query = query.order(by: "timestamp", descending: true).limit(to: limit)
             
             let snapshot = try await query.getDocuments()
-            let decisions = snapshot.documents.compactMap { try? $0.data(as: Decision.self) }
+            let decisions = try snapshot.documents.compactMap { try $0.data(as: Decision.self) }
             
-            logger.info("Fetched \(decisions.count) decisions for user: \(userId)")
+            logger.info("Fetched \(decisions.count) decisions")
             return decisions
             
         } catch {
             logger.error("Failed to list decisions: \(error.localizedDescription)")
-            throw error
-        }
-    }
-    
-    /// Lists all decisions for a conversation
-    /// - Parameter conversationId: Conversation ID
-    /// - Returns: Array of decisions
-    /// - Throws: Error if fetch fails
-    func listDecisionsForConversation(conversationId: String) async throws -> [Decision] {
-        logger.info("Listing decisions for conversation: \(conversationId)")
-        
-        do {
-            let query = db.collection(decisionsCollection)
-                .whereField("conversationId", isEqualTo: conversationId)
-                .order(by: "timestamp", descending: true)
-            
-            let snapshot = try await query.getDocuments()
-            let decisions = snapshot.documents.compactMap { try? $0.data(as: Decision.self) }
-            
-            logger.info("Fetched \(decisions.count) decisions for conversation: \(conversationId)")
-            return decisions
-            
-        } catch {
-            logger.error("Failed to list decisions for conversation: \(error.localizedDescription)")
             throw error
         }
     }
@@ -126,106 +114,68 @@ class DecisionService {
             try await docRef.delete()
             logger.info("Decision deleted successfully: \(id)")
             
+            // Also delete vector embedding from backend
+            try await deleteDecisionVector(id)
+            
         } catch {
             logger.error("Failed to delete decision: \(error.localizedDescription)")
             throw error
         }
     }
     
-    // MARK: - Real-time Listeners
+    // MARK: - Vector Storage (Backend Integration)
     
-    /// Observes changes to a specific decision
-    /// - Parameters:
-    ///   - id: Decision ID
-    ///   - onChange: Callback with updated decision or nil if deleted
-    /// - Returns: ListenerRegistration to stop observing
-    func observeDecision(id: String, onChange: @escaping (Decision?) -> Void) -> ListenerRegistration {
-        logger.info("Starting real-time listener for decision: \(id)")
-        
-        let docRef = db.collection(decisionsCollection).document(id)
-        
-        return docRef.addSnapshotListener { snapshot, error in
-            if let error = error {
-                self.logger.error("Decision listener error: \(error.localizedDescription)")
-                onChange(nil)
-                return
-            }
-            
-            guard let snapshot = snapshot, snapshot.exists else {
-                self.logger.info("Decision deleted or not found: \(id)")
-                onChange(nil)
-                return
-            }
-            
-            do {
-                let decision = try snapshot.data(as: Decision.self)
-                self.logger.info("Decision updated via listener: \(id)")
-                onChange(decision)
-            } catch {
-                self.logger.error("Failed to decode decision: \(error.localizedDescription)")
-                onChange(nil)
-            }
+    /// Store decision vector embedding in backend for semantic search
+    private func storeDecisionVector(_ decision: Decision) async throws {
+        guard let url = URL(string: "\(Config.backendURL)/api/v1/decisions/vector") else {
+            logger.error("Invalid backend URL")
+            return
         }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let body: [String: Any] = [
+            "decisionId": decision.decisionId,
+            "text": decision.text,
+            "userId": decision.userId,
+            "conversationId": decision.conversationId,
+            "messageId": decision.sourceMessageId,
+            "timestamp": ISO8601DateFormatter().string(from: decision.timestamp)
+        ]
+        
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        
+        let (_, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            logger.warning("Failed to store decision vector in backend")
+            // Don't throw - decision is already in Firestore
+            return
+        }
+        
+        logger.info("Decision vector stored in backend: \(decision.decisionId)")
     }
     
-    /// Observes all decisions for a user
-    /// - Parameters:
-    ///   - userId: User ID
-    ///   - onChange: Callback with array of decisions
-    /// - Returns: ListenerRegistration to stop observing
-    func observeUserDecisions(userId: String, onChange: @escaping ([Decision]) -> Void) -> ListenerRegistration {
-        logger.info("Starting real-time listener for user decisions: \(userId)")
-        
-        let query = db.collection(decisionsCollection)
-            .whereField("userId", isEqualTo: userId)
-            .order(by: "timestamp", descending: true)
-        
-        return query.addSnapshotListener { snapshot, error in
-            if let error = error {
-                self.logger.error("User decisions listener error: \(error.localizedDescription)")
-                onChange([])
-                return
-            }
-            
-            guard let snapshot = snapshot else {
-                onChange([])
-                return
-            }
-            
-            let decisions = snapshot.documents.compactMap { try? $0.data(as: Decision.self) }
-            self.logger.info("User decisions updated via listener: \(decisions.count) decisions")
-            onChange(decisions)
+    /// Delete decision vector embedding from backend
+    private func deleteDecisionVector(_ decisionId: String) async throws {
+        guard let url = URL(string: "\(Config.backendURL)/api/v1/decisions/vector/\(decisionId)") else {
+            logger.error("Invalid backend URL")
+            return
         }
-    }
-    
-    /// Observes all decisions for a conversation
-    /// - Parameters:
-    ///   - conversationId: Conversation ID
-    ///   - onChange: Callback with array of decisions
-    /// - Returns: ListenerRegistration to stop observing
-    func observeConversationDecisions(conversationId: String, onChange: @escaping ([Decision]) -> Void) -> ListenerRegistration {
-        logger.info("Starting real-time listener for conversation decisions: \(conversationId)")
         
-        let query = db.collection(decisionsCollection)
-            .whereField("conversationId", isEqualTo: conversationId)
-            .order(by: "timestamp", descending: true)
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
         
-        return query.addSnapshotListener { snapshot, error in
-            if let error = error {
-                self.logger.error("Conversation decisions listener error: \(error.localizedDescription)")
-                onChange([])
-                return
-            }
-            
-            guard let snapshot = snapshot else {
-                onChange([])
-                return
-            }
-            
-            let decisions = snapshot.documents.compactMap { try? $0.data(as: Decision.self) }
-            self.logger.info("Conversation decisions updated via listener: \(decisions.count) decisions")
-            onChange(decisions)
+        let (_, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            logger.warning("Failed to delete decision vector from backend")
+            // Don't throw - decision is already deleted from Firestore
+            return
         }
+        
+        logger.info("Decision vector deleted from backend: \(decisionId)")
     }
 }
-

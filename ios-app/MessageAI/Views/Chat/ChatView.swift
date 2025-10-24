@@ -33,10 +33,15 @@ struct ChatView: View {
     @State private var showRetryActionSheet = false
     @State private var selectedMessageForRetry: Message?
     
-    // State for AI features (Story 5.1)
+    // State for AI features (Story 5.1 & 5.2)
     @State private var showEventCreationModal = false
     @State private var selectedEventData: CalendarDetection?
     @State private var selectedMessageId: String?
+    
+    @State private var showDecisionConfirmationModal = false
+    @State private var selectedDecisionData: DecisionDetection?
+    
+    @State private var showPerChatDecisions = false  // NEW - Story 5.2 AC5
     
     // MARK: - Initialization
     
@@ -115,6 +120,18 @@ struct ChatView: View {
                     }
                 }
             }
+            
+            // Per-Chat Decisions button (Story 5.2 AC5)
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button(action: {
+                    showPerChatDecisions = true
+                }) {
+                    Image(systemName: "checkmark.circle")
+                        .foregroundStyle(.green)
+                }
+                .accessibilityLabel("Chat Decisions")
+                .accessibilityHint("View decisions from this conversation")
+            }
         }
         .onAppear {
             viewModel.onAppear()
@@ -151,6 +168,29 @@ struct ChatView: View {
                     // Event created successfully - dismiss AI prompt
                     viewModel.dismissAISuggestion(for: messageId)
                     print("Event created: \(event.title)")
+                }
+            }
+        }
+        .sheet(isPresented: $showDecisionConfirmationModal) {
+            if let decisionData = selectedDecisionData,
+               let messageId = selectedMessageId,
+               let conversationId = conversationId {
+                DecisionConfirmationView(
+                    initialData: decisionData,
+                    messageId: messageId,
+                    conversationId: conversationId
+                ) { decision in
+                    // Decision saved successfully - dismiss AI prompt
+                    viewModel.dismissAISuggestion(for: messageId)
+                    print("Decision saved: \(decision.text)")
+                }
+            }
+        }
+        .sheet(isPresented: $showPerChatDecisions) {
+            // Per-Chat Decisions View (Story 5.2 AC5)
+            if let conversationId = conversationId {
+                NavigationStack {
+                    DecisionsListView(conversationId: conversationId)
                 }
             }
         }
@@ -226,7 +266,9 @@ struct ChatView: View {
                                                         text: "Save decision",
                                                         tintColor: .green
                                                     ) {
-                                                        print("Save decision: \(analysis.decision)")
+                                                        selectedDecisionData = analysis.decision
+                                                        selectedMessageId = message.messageId
+                                                        showDecisionConfirmationModal = true
                                                     }
                                                 }
                                             }

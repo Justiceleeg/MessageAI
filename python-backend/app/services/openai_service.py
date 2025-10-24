@@ -159,7 +159,8 @@ Respond with ONLY a JSON array like: ["point1", "point2", "point3"]"""
     def analyze_message_comprehensive(
         self, 
         text: str,
-        user_calendar: Optional[List[Dict[str, Any]]] = None
+        user_calendar: Optional[List[Dict[str, Any]]] = None,
+        conversation_context: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
         """
         Comprehensive message analysis detecting events, reminders, decisions, RSVP, priority, and conflicts
@@ -167,12 +168,23 @@ Respond with ONLY a JSON array like: ["point1", "point2", "point3"]"""
         Args:
             text: Message text to analyze
             user_calendar: Optional list of user's existing calendar events for conflict detection
+            conversation_context: Optional list of recent messages from conversation for RAG (Story 5.2)
         
         Returns:
             Dictionary with all detection results
         """
         import json
         from datetime import datetime
+        
+        # Build conversation context if provided (Story 5.2 - Lightweight RAG)
+        context_section = ""
+        if conversation_context and len(conversation_context) > 0:
+            context_section = "\n\nRECENT CONVERSATION CONTEXT:\n"
+            for msg in conversation_context:
+                sender = msg.get('metadata', {}).get('sender', 'User')
+                content = msg.get('content', '')
+                context_section += f"{sender}: {content}\n"
+            context_section += f"\nCurrent message: {text}\n"
         
         # Build calendar context if provided
         calendar_context = ""
@@ -188,7 +200,7 @@ IMPORTANT DISTINCTIONS:
 - **Reminders** are personal tasks with deadlines but NO specific time. Example: "Send docs by Friday"  
 - **Decisions** are group agreements with NO time constraints. Example: "Let's go to Italian restaurant"
 
-Analyze this message: "{text}"{calendar_context}
+{context_section if context_section else f'Analyze this message: "{text}"'}{calendar_context}
 
 Detect ALL of the following (return JSON):
 1. **calendar**: Detect calendar events (date + time + multiple people)
@@ -203,9 +215,16 @@ Detect ALL of the following (return JSON):
    - title: task description (null if not detected)
    - due_date: ISO 8601 (YYYY-MM-DD, null if not detected)
 
-3. **decision**: Detect decisions/agreements
+3. **decision**: Detect decisions/agreements (Story 5.2 - Context-Aware Detection)
    - detected: true/false
-   - text: the decision made (null if not detected)
+   - text: COMPLETE decision statement using conversation context if provided (null if not detected)
+   - CRITICAL: Agreement phrases like "sounds good", "yeah", "okay", "let's do it", "I'm in" ARE decisions when context is provided
+   - ALWAYS use conversation context to create a complete, clear decision statement
+   - Examples:
+     * "Yeah, sounds good" + context "Italian restaurant on Main St" → detected=true, text="Going to Italian restaurant on Main Street"
+     * "Okay" + context "meeting at 3pm Friday" → detected=true, text="Meeting at 3pm on Friday"
+     * "Let's do it" + context "Luigi's for dinner" → detected=true, text="Going to Luigi's for dinner"
+     * "I'm in" + context "coffee at Starbucks" → detected=true, text="Meeting at Starbucks for coffee"
 
 4. **rsvp**: Detect RSVP responses
    - detected: true/false

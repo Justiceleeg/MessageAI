@@ -291,3 +291,51 @@ class EventSearchResponse(BaseModel):
             }
         }
 
+
+class DecisionCreateResponse(BaseModel):
+    """Response for decision vector storage (Story 5.2)"""
+    success: bool
+    decisionId: Optional[str] = None
+    message: str = Field(..., description="Status message")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "success": True,
+                "decisionId": "dec_123",
+                "message": "Decision vector stored successfully"
+            }
+        }
+
+
+class DecisionSearchResult(BaseModel):
+    """Single decision search result (Story 5.2)"""
+    decisionId: str
+    text: str
+    conversationId: str
+    messageId: str
+    timestamp: str
+    similarity: float = Field(..., ge=0.0, le=1.0, description="Similarity score")
+
+
+class DecisionSearchResponse(BaseModel):
+    """Response for decision search (Story 5.2)"""
+    results: List[DecisionSearchResult] = Field(default_factory=list)
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "results": [
+                    {
+                        "decisionId": "dec_123",
+                        "text": "Going to Luigi's Italian restaurant",
+                        "conversationId": "conv_456",
+                        "messageId": "msg_789",
+                        "timestamp": "2025-10-24T15:30:00Z",
+                        "similarity": 0.94
+                    }
+                ]
+            }
+        }
+
+
