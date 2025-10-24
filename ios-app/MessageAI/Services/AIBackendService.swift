@@ -142,13 +142,23 @@ class AIBackendService {
         text: String,
         userId: String,
         conversationId: String,
+        timestamp: Date? = nil,  // Message timestamp for accurate date parsing
         userCalendar: [String]? = nil  // Simplified for MVP
     ) async throws -> MessageAnalysisResponse {
+        // Convert timestamp to ISO 8601 string
+        let timestampString: String?
+        if let timestamp = timestamp {
+            timestampString = ISO8601DateFormatter().string(from: timestamp)
+        } else {
+            timestampString = nil
+        }
+        
         let request = MessageAnalysisRequest(
             messageId: messageId,
             text: text,
             userId: userId,
             conversationId: conversationId,
+            timestamp: timestampString,
             userCalendar: userCalendar
         )
         
@@ -290,6 +300,7 @@ struct MessageAnalysisRequest: Codable {
     let text: String
     let userId: String
     let conversationId: String
+    let timestamp: String?  // ISO 8601 timestamp for accurate date calculations
     let userCalendar: [String]? // Simplified - not used in MVP
 }
 

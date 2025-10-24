@@ -359,7 +359,11 @@ struct GroupNameEntryView: View {
     let onCreateGroup: (String?) -> Void
     
     @State private var groupName: String = ""
+    @State private var validationError: String?
     @FocusState private var isTextFieldFocused: Bool
+    
+    // Maximum group name length
+    private let maxNameLength = 50
     
     var body: some View {
         NavigationStack {
@@ -387,9 +391,32 @@ struct GroupNameEntryView: View {
                         .textFieldStyle(.roundedBorder)
                         .focused($isTextFieldFocused)
                         .submitLabel(.done)
+                        .onChange(of: groupName) { _, newValue in
+                            // Validate on change
+                            validateGroupName(newValue)
+                            
+                            // Enforce max length
+                            if newValue.count > maxNameLength {
+                                groupName = String(newValue.prefix(maxNameLength))
+                            }
+                        }
                         .onSubmit {
                             createGroup()
                         }
+                    
+                    // Character count and validation feedback
+                    HStack {
+                        if let error = validationError {
+                            Text(error)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                        } else if !groupName.isEmpty {
+                            Text("\(groupName.count)/\(maxNameLength)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
                 }
                 .padding(.horizontal)
                 
@@ -408,6 +435,7 @@ struct GroupNameEntryView: View {
                     Button("Create") {
                         createGroup()
                     }
+                    .disabled(validationError != nil)
                 }
             }
             .onAppear {
@@ -416,6 +444,31 @@ struct GroupNameEntryView: View {
                     isTextFieldFocused = true
                 }
             }
+        }
+    }
+    
+    private func validateGroupName(_ name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Reset validation error
+        validationError = nil
+        
+        // Empty is allowed (optional field)
+        guard !trimmed.isEmpty else {
+            return
+        }
+        
+        // Firebase doesn't allow these characters: . # $ [ ]
+        let forbiddenCharacters = CharacterSet(charactersIn: ".#$[]")
+        if trimmed.unicodeScalars.contains(where: { forbiddenCharacters.contains($0) }) {
+            validationError = "Cannot use . # $ [ ] characters"
+            return
+        }
+        
+        // Check minimum length if not empty
+        if trimmed.count < 2 {
+            validationError = "Group name must be at least 2 characters"
+            return
         }
     }
     

@@ -534,7 +534,8 @@ final class ConversationListViewModel: ObservableObject {
                 messageId: message.messageId,
                 text: message.text,
                 userId: message.senderId,
-                conversationId: conversationId
+                conversationId: conversationId,
+                timestamp: message.timestamp  // Pass message timestamp for accurate date parsing
             )
             
             // If priority detected, update Firestore

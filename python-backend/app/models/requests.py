@@ -13,6 +13,7 @@ class MessageAnalysisRequest(BaseModel):
     text: str = Field(..., description="Message text content")
     user_id: str = Field(..., description="User who sent the message")
     conversation_id: str = Field(..., description="Conversation identifier")
+    timestamp: Optional[str] = Field(None, description="Message timestamp (ISO 8601)")
     user_calendar: Optional[List[dict]] = Field(default=None, description="User's existing calendar events")
     
     class Config:
@@ -22,6 +23,7 @@ class MessageAnalysisRequest(BaseModel):
                 "text": "Let's meet Friday at 3pm for coffee",
                 "user_id": "user_456",
                 "conversation_id": "conv_789",
+                "timestamp": "2025-10-24T10:30:00Z",
                 "user_calendar": []
             }
         }

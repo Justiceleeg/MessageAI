@@ -231,8 +231,11 @@ struct EventCreationView: View {
     
     private static func parseDate(_ dateString: String?) -> Date? {
         guard let dateString = dateString else { return nil }
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate]
+        
+        // Use DateFormatter with local timezone to avoid UTC interpretation
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = TimeZone.current  // Use local timezone
         return formatter.date(from: dateString)
     }
     

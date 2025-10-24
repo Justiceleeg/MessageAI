@@ -4,7 +4,7 @@ Handles comprehensive message analysis including event detection, reminders, dec
 """
 from fastapi import APIRouter, HTTPException
 from app.models.requests import MessageAnalysisRequest
-from app.models.responses import MessageAnalysisResponse
+from app.models.responses import MessageAnalysisResponse, CalendarDetection, ReminderDetection, DecisionDetection, RSVPDetection, PriorityDetection, ConflictDetection
 from app.services.openai_service import get_openai_service
 from app.services.vector_store import get_vector_store
 
@@ -40,6 +40,7 @@ async def analyze_message(request: MessageAnalysisRequest):
         # Step 2: Analyze message with GPT-4o-mini (with context if available)
         analysis = openai_service.analyze_message_comprehensive(
             text=request.text,
+            message_timestamp=request.timestamp,  # Pass message timestamp for date calculations
             user_calendar=request.user_calendar,
             conversation_context=conversation_context  # RAG context
         )
@@ -65,12 +66,36 @@ async def analyze_message(request: MessageAnalysisRequest):
         # Build response
         return MessageAnalysisResponse(
             message_id=request.message_id,
-            calendar=analysis["calendar"],
-            reminder=analysis["reminder"],
-            decision=analysis["decision"],
-            rsvp=analysis["rsvp"],
-            priority=analysis["priority"],
-            conflict=analysis["conflict"]
+            calendar=CalendarDetection(
+                detected=analysis["calendar"]["detected"],
+                title=analysis["calendar"]["title"],
+                date=analysis["calendar"].get("date"),  # Use the parsed date
+                time=analysis["calendar"]["time"],
+                location=analysis["calendar"]["location"]
+            ),
+            reminder=ReminderDetection(
+                detected=analysis["reminder"]["detected"],
+                title=analysis["reminder"]["title"],
+                due_date=analysis["reminder"].get("due_date")  # Use the parsed due_date
+            ),
+            decision=DecisionDetection(
+                detected=analysis["decision"]["detected"],
+                text=analysis["decision"]["text"]
+            ),
+            rsvp=RSVPDetection(
+                detected=analysis["rsvp"]["detected"],
+                status=analysis["rsvp"]["status"],
+                event_reference=analysis["rsvp"]["event_reference"]
+            ),
+            priority=PriorityDetection(
+                detected=analysis["priority"]["detected"],
+                level=analysis["priority"]["level"],
+                reason=analysis["priority"]["reason"]
+            ),
+            conflict=ConflictDetection(
+                detected=analysis["conflict"]["detected"],
+                conflicting_events=analysis["conflict"]["conflicting_events"]
+            )
         )
         
     except Exception as e:

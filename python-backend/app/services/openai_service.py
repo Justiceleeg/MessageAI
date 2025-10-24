@@ -159,6 +159,7 @@ Respond with ONLY a JSON array like: ["point1", "point2", "point3"]"""
     def analyze_message_comprehensive(
         self, 
         text: str,
+        message_timestamp: Optional[str] = None,
         user_calendar: Optional[List[Dict[str, Any]]] = None,
         conversation_context: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
@@ -167,6 +168,7 @@ Respond with ONLY a JSON array like: ["point1", "point2", "point3"]"""
         
         Args:
             text: Message text to analyze
+            message_timestamp: Optional ISO 8601 timestamp of when the message was sent (for accurate date calculations)
             user_calendar: Optional list of user's existing calendar events for conflict detection
             conversation_context: Optional list of recent messages from conversation for RAG (Story 5.2)
         
@@ -174,7 +176,17 @@ Respond with ONLY a JSON array like: ["point1", "point2", "point3"]"""
             Dictionary with all detection results
         """
         import json
-        from datetime import datetime
+        from datetime import datetime, timedelta
+        
+        # Use message timestamp if provided, otherwise use current time
+        if message_timestamp:
+            try:
+                reference_time = datetime.fromisoformat(message_timestamp.replace('Z', '+00:00'))
+            except (ValueError, AttributeError):
+                print(f"⚠️ Invalid timestamp format: {message_timestamp}, using current time")
+                reference_time = datetime.now()
+        else:
+            reference_time = datetime.now()
         
         # Build conversation context if provided (Story 5.2 - Lightweight RAG)
         context_section = ""
@@ -202,18 +214,31 @@ IMPORTANT DISTINCTIONS:
 
 {context_section if context_section else f'Analyze this message: "{text}"'}{calendar_context}
 
+CRITICAL DATE/TIME PARSING RULES:
+Current date context: {reference_time.strftime('%Y-%m-%d (%A)')}
+Current time context: {reference_time.strftime('%H:%M')}
+
+Your job is to EXTRACT temporal expressions, NOT calculate dates.
+Examples:
+- "Let's meet tomorrow at 7pm" → extract: date_expression="tomorrow", time="19:00"
+- "Dinner this Saturday" → extract: date_expression="this Saturday", time=null
+- "Coffee in 3 days at 2pm" → extract: date_expression="3 days from now", time="14:00"
+- "Meeting next Monday morning" → extract: date_expression="next Monday", time="09:00"
+
+DO NOT calculate actual dates - just extract the expression and time!
+
 Detect ALL of the following (return JSON):
 1. **calendar**: Detect calendar events (date + time + multiple people)
    - detected: true/false
    - title: brief event name (null if not detected)
-   - date: ISO 8601 (YYYY-MM-DD, null if not detected)
+   - date_expression: temporal expression as-is from message (e.g., "tomorrow", "this Saturday", "3 days from now")
    - time: HH:MM 24-hour format (null if no specific time)
    - location: place name (null if not mentioned)
 
 2. **reminder**: Detect reminders (tasks with deadlines, NO specific time)
    - detected: true/false
    - title: task description (null if not detected)
-   - due_date: ISO 8601 (YYYY-MM-DD, null if not detected)
+   - date_expression: temporal expression for due date (e.g., "Friday", "next week")
 
 3. **decision**: Detect decisions/agreements (Story 5.2 - Context-Aware Detection)
    - detected: true/false
@@ -243,12 +268,10 @@ Detect ALL of the following (return JSON):
    - detected: true/false
    - conflicting_events: [] (list of event titles that conflict)
 
-Current date context: {datetime.now().strftime('%Y-%m-%d')}
-
 Return ONLY valid JSON in this exact structure:
 {{
-  "calendar": {{"detected": false, "title": null, "date": null, "time": null, "location": null}},
-  "reminder": {{"detected": false, "title": null, "due_date": null}},
+  "calendar": {{"detected": false, "title": null, "date_expression": null, "time": null, "location": null}},
+  "reminder": {{"detected": false, "title": null, "date_expression": null}},
   "decision": {{"detected": false, "text": null}},
   "rsvp": {{"detected": false, "status": null, "event_reference": null}},
   "priority": {{"detected": false, "level": null, "reason": null}},
@@ -268,8 +291,8 @@ Return ONLY valid JSON in this exact structure:
             result = json.loads(response)
             # Ensure all required fields are present with defaults
             defaults = {
-                "calendar": {"detected": False, "title": None, "date": None, "time": None, "location": None},
-                "reminder": {"detected": False, "title": None, "due_date": None},
+                "calendar": {"detected": False, "title": None, "date_expression": None, "time": None, "location": None},
+                "reminder": {"detected": False, "title": None, "date_expression": None},
                 "decision": {"detected": False, "text": None},
                 "rsvp": {"detected": False, "status": None, "event_reference": None},
                 "priority": {"detected": False, "level": None, "reason": None},
@@ -283,19 +306,74 @@ Return ONLY valid JSON in this exact structure:
                     for subkey in defaults[key]:
                         if subkey not in result[key]:
                             result[key][subkey] = defaults[key][subkey]
+            
+            # POST-PROCESS: Parse date expressions using dateparser
+            result = self._parse_date_expressions(result, reference_time)
+            
             return result
         except json.JSONDecodeError as e:
             print(f"Failed to parse GPT response: {e}")
             print(f"Response was: {response}")
             # Return empty detections on error
             return {
-                "calendar": {"detected": False, "title": None, "date": None, "time": None, "location": None},
-                "reminder": {"detected": False, "title": None, "due_date": None},
+                "calendar": {"detected": False, "title": None, "date_expression": None, "time": None, "location": None},
+                "reminder": {"detected": False, "title": None, "date_expression": None},
                 "decision": {"detected": False, "text": None},
                 "rsvp": {"detected": False, "status": None, "event_reference": None},
                 "priority": {"detected": False, "level": None, "reason": None},
                 "conflict": {"detected": False, "conflicting_events": []}
             }
+
+    def _parse_date_expressions(self, result: Dict[str, Any], reference_time) -> Dict[str, Any]:
+        """
+        Parse date expressions from AI response into actual ISO dates using dateparser
+        
+        Args:
+            result: The AI analysis result with date_expression fields
+            reference_time: The reference datetime for relative date parsing
+            
+        Returns:
+            Updated result with 'date' and 'due_date' fields added
+        """
+        import dateparser
+        
+        # Parse calendar date expression
+        if result["calendar"]["detected"] and result["calendar"]["date_expression"]:
+            date_expr = result["calendar"]["date_expression"]
+            parsed_date = dateparser.parse(
+                date_expr,
+                settings={
+                    'RELATIVE_BASE': reference_time,
+                    'PREFER_DATES_FROM': 'future',  # Always interpret as future dates
+                    'RETURN_AS_TIMEZONE_AWARE': False
+                }
+            )
+            if parsed_date:
+                result["calendar"]["date"] = parsed_date.strftime('%Y-%m-%d')
+            else:
+                result["calendar"]["date"] = None
+        else:
+            result["calendar"]["date"] = None
+        
+        # Parse reminder date expression
+        if result["reminder"]["detected"] and result["reminder"]["date_expression"]:
+            date_expr = result["reminder"]["date_expression"]
+            parsed_date = dateparser.parse(
+                date_expr,
+                settings={
+                    'RELATIVE_BASE': reference_time,
+                    'PREFER_DATES_FROM': 'future',
+                    'RETURN_AS_TIMEZONE_AWARE': False
+                }
+            )
+            if parsed_date:
+                result["reminder"]["due_date"] = parsed_date.strftime('%Y-%m-%d')
+            else:
+                result["reminder"]["due_date"] = None
+        else:
+            result["reminder"]["due_date"] = None
+        
+        return result
 
 
 # Singleton instance

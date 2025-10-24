@@ -371,9 +371,20 @@ final class ChatViewModel: ObservableObject {
     
     /// Send a message with optimistic UI (handles both new and existing conversations)
     func sendMessage() async {
-        // Validate message text
-        let trimmedText = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedText.isEmpty else {
+        // Capture and clear message text on main actor
+        let text = await MainActor.run { () -> String in
+            let trimmedText = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedText.isEmpty else {
+                return ""
+            }
+            // Clear immediately after capturing
+            messageText = ""
+            errorMessage = nil
+            return trimmedText
+        }
+        
+        // Return early if empty
+        guard !text.isEmpty else {
             logger.warning("Attempted to send empty message")
             return
         }
@@ -381,14 +392,11 @@ final class ChatViewModel: ObservableObject {
         // Get current user
         guard let currentUser = authService.currentUser else {
             logger.error("No current user - cannot send message")
-            errorMessage = "You must be logged in to send messages."
+            await MainActor.run {
+                errorMessage = "You must be logged in to send messages."
+            }
             return
         }
-        
-        // Clear message text immediately for better UX
-        let text = trimmedText
-        messageText = ""
-        errorMessage = nil
         
         // Stop typing indicator when sending message (Story 3.5)
         stopTypingOnSend()
@@ -1381,6 +1389,7 @@ final class ChatViewModel: ObservableObject {
                     text: message.text,
                     userId: currentUser.userId,
                     conversationId: conversationId,
+                    timestamp: message.timestamp,  // Pass message timestamp for accurate date parsing
                     userCalendar: nil  // TODO: Pass user's calendar in future story
                 )
                 
