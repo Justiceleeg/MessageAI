@@ -155,6 +155,124 @@ Respond with ONLY a JSON array like: ["point1", "point2", "point3"]"""
             return json.loads(response)
         except json.JSONDecodeError:
             return []
+    
+    def analyze_message_comprehensive(
+        self, 
+        text: str,
+        user_calendar: Optional[List[Dict[str, Any]]] = None
+    ) -> Dict[str, Any]:
+        """
+        Comprehensive message analysis detecting events, reminders, decisions, RSVP, priority, and conflicts
+        
+        Args:
+            text: Message text to analyze
+            user_calendar: Optional list of user's existing calendar events for conflict detection
+        
+        Returns:
+            Dictionary with all detection results
+        """
+        import json
+        from datetime import datetime
+        
+        # Build calendar context if provided
+        calendar_context = ""
+        if user_calendar:
+            calendar_context = "\n\nUser's existing calendar events:\n"
+            for event in user_calendar[:10]:  # Limit to 10 most recent
+                calendar_context += f"- {event.get('title', 'Untitled')} on {event.get('date', 'Unknown')}\n"
+        
+        system_prompt = f"""You are an AI assistant that analyzes messages for important information.
+
+IMPORTANT DISTINCTIONS:
+- **Events** are social gatherings with BOTH specific date AND time, involving multiple people. Example: "Dinner Friday at 7pm"
+- **Reminders** are personal tasks with deadlines but NO specific time. Example: "Send docs by Friday"  
+- **Decisions** are group agreements with NO time constraints. Example: "Let's go to Italian restaurant"
+
+Analyze this message: "{text}"{calendar_context}
+
+Detect ALL of the following (return JSON):
+1. **calendar**: Detect calendar events (date + time + multiple people)
+   - detected: true/false
+   - title: brief event name (null if not detected)
+   - date: ISO 8601 (YYYY-MM-DD, null if not detected)
+   - time: HH:MM 24-hour format (null if no specific time)
+   - location: place name (null if not mentioned)
+
+2. **reminder**: Detect reminders (tasks with deadlines, NO specific time)
+   - detected: true/false
+   - title: task description (null if not detected)
+   - due_date: ISO 8601 (YYYY-MM-DD, null if not detected)
+
+3. **decision**: Detect decisions/agreements
+   - detected: true/false
+   - text: the decision made (null if not detected)
+
+4. **rsvp**: Detect RSVP responses
+   - detected: true/false
+   - status: "accepted" or "declined" (null if not detected)
+   - event_reference: what event they're responding to (null if not clear)
+
+5. **priority**: Detect urgency/priority
+   - detected: true/false
+   - level: "low", "medium", or "high" (null if not detected)
+
+6. **conflict**: Detect schedule conflicts (check against user_calendar)
+   - detected: true/false
+   - conflicting_events: [] (list of event titles that conflict)
+
+Current date context: {datetime.now().strftime('%Y-%m-%d')}
+
+Return ONLY valid JSON in this exact structure:
+{{
+  "calendar": {{"detected": false, "title": null, "date": null, "time": null, "location": null}},
+  "reminder": {{"detected": false, "title": null, "due_date": null}},
+  "decision": {{"detected": false, "text": null}},
+  "rsvp": {{"detected": false, "status": null, "event_reference": null}},
+  "priority": {{"detected": false, "level": null}},
+  "conflict": {{"detected": false, "conflicting_events": []}}
+}}"""
+        
+        messages = [{"role": "user", "content": text}]
+        
+        response = self.chat_completion(
+            messages=messages,
+            system_prompt=system_prompt,
+            temperature=0.2  # Low temperature for consistent structured output
+        )
+        
+        # Parse JSON response
+        try:
+            result = json.loads(response)
+            # Ensure all required fields are present with defaults
+            defaults = {
+                "calendar": {"detected": False, "title": None, "date": None, "time": None, "location": None},
+                "reminder": {"detected": False, "title": None, "due_date": None},
+                "decision": {"detected": False, "text": None},
+                "rsvp": {"detected": False, "status": None, "event_reference": None},
+                "priority": {"detected": False, "level": None},
+                "conflict": {"detected": False, "conflicting_events": []}
+            }
+            # Merge defaults with result
+            for key in defaults:
+                if key not in result:
+                    result[key] = defaults[key]
+                else:
+                    for subkey in defaults[key]:
+                        if subkey not in result[key]:
+                            result[key][subkey] = defaults[key][subkey]
+            return result
+        except json.JSONDecodeError as e:
+            print(f"Failed to parse GPT response: {e}")
+            print(f"Response was: {response}")
+            # Return empty detections on error
+            return {
+                "calendar": {"detected": False, "title": None, "date": None, "time": None, "location": None},
+                "reminder": {"detected": False, "title": None, "due_date": None},
+                "decision": {"detected": False, "text": None},
+                "rsvp": {"detected": False, "status": None, "event_reference": None},
+                "priority": {"detected": False, "level": None},
+                "conflict": {"detected": False, "conflicting_events": []}
+            }
 
 
 # Singleton instance

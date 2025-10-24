@@ -16,6 +16,10 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         FirebaseApp.configure()
+        
+        // Print configuration info (Story 5.1 - Environment Management)
+        Config.printConfiguration()
+        
         return true
     }
     

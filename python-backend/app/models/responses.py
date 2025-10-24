@@ -173,3 +173,121 @@ class HealthResponse(BaseModel):
     status: str
     service: str = "messageai-backend"
 
+
+class CalendarDetection(BaseModel):
+    """Calendar event detection result"""
+    detected: bool = Field(..., description="Whether a calendar event was detected")
+    title: Optional[str] = Field(None, description="Event title")
+    date: Optional[str] = Field(None, description="Event date (ISO 8601)")
+    time: Optional[str] = Field(None, description="Event time (HH:MM)")
+    location: Optional[str] = Field(None, description="Event location")
+
+
+class ReminderDetection(BaseModel):
+    """Reminder detection result"""
+    detected: bool = Field(..., description="Whether a reminder was detected")
+    title: Optional[str] = Field(None, description="Reminder title")
+    due_date: Optional[str] = Field(None, description="Due date (ISO 8601)")
+
+
+class DecisionDetection(BaseModel):
+    """Decision detection result"""
+    detected: bool = Field(..., description="Whether a decision was detected")
+    text: Optional[str] = Field(None, description="Decision text")
+
+
+class RSVPDetection(BaseModel):
+    """RSVP detection result"""
+    detected: bool = Field(..., description="Whether an RSVP was detected")
+    status: Optional[str] = Field(None, description="RSVP status (accepted, declined)")
+    event_reference: Optional[str] = Field(None, description="Referenced event title/date")
+
+
+class PriorityDetection(BaseModel):
+    """Priority/urgency detection result"""
+    detected: bool = Field(..., description="Whether priority was detected")
+    level: Optional[str] = Field(None, description="Priority level (low, medium, high)")
+
+
+class ConflictDetection(BaseModel):
+    """Schedule conflict detection result"""
+    detected: bool = Field(..., description="Whether a conflict was detected")
+    conflicting_events: List[str] = Field(default_factory=list, description="List of conflicting event IDs")
+
+
+class MessageAnalysisResponse(BaseModel):
+    """Response for comprehensive message analysis"""
+    message_id: str
+    calendar: CalendarDetection
+    reminder: ReminderDetection
+    decision: DecisionDetection
+    rsvp: RSVPDetection
+    priority: PriorityDetection
+    conflict: ConflictDetection
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "message_id": "msg_123",
+                "calendar": {
+                    "detected": True,
+                    "title": "Coffee meeting",
+                    "date": "2025-10-27",
+                    "time": "15:00",
+                    "location": "Starbucks"
+                },
+                "reminder": {"detected": False},
+                "decision": {"detected": False},
+                "rsvp": {"detected": False},
+                "priority": {"detected": False},
+                "conflict": {"detected": False, "conflicting_events": []}
+            }
+        }
+
+
+class EventCreateResponse(BaseModel):
+    """Response for event creation"""
+    success: bool
+    event_id: Optional[str] = None
+    suggest_link: bool = Field(default=False, description="Whether to suggest linking to existing event")
+    similar_event: Optional[Dict[str, Any]] = Field(None, description="Similar event if found")
+    message: str = Field(..., description="Status message")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "success": True,
+                "event_id": "evt_123",
+                "suggest_link": False,
+                "similar_event": None,
+                "message": "Event created successfully"
+            }
+        }
+
+
+class EventSearchResult(BaseModel):
+    """Single event search result"""
+    event_id: str
+    title: str
+    date: str
+    similarity: float = Field(..., ge=0.0, le=1.0, description="Similarity score")
+
+
+class EventSearchResponse(BaseModel):
+    """Response for event search"""
+    results: List[EventSearchResult] = Field(default_factory=list)
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "results": [
+                    {
+                        "event_id": "evt_123",
+                        "title": "Coffee meeting",
+                        "date": "2025-10-27",
+                        "similarity": 0.92
+                    }
+                ]
+            }
+        }
+

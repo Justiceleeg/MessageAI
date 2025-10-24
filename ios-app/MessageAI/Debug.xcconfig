@@ -1,0 +1,6 @@
+// Debug Configuration
+#include "Config.xcconfig"
+
+// Use local backend for debug builds
+AI_BACKEND_URL = http:/$()/127.0.0.1:8000
+

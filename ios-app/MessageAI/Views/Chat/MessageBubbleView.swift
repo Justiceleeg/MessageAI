@@ -8,7 +8,7 @@
 import SwiftUI
 
 /// Reusable message bubble component for chat interface
-struct MessageBubbleView: View {
+struct MessageBubbleView<AIPrompt: View>: View {
     
     let message: Message
     let isSentByCurrentUser: Bool
@@ -19,10 +19,22 @@ struct MessageBubbleView: View {
     let isOnline: Bool?  // Presence indicator for group chat sender (Story 3.3)
     let readCount: Int  // Number of users who have read this message (Story 4.1)
     let shouldShowReadReceipt: Bool  // Whether to show read receipt on this message (Story 4.1 UX)
+    let aiPrompt: AIPrompt?  // Optional AI prompt view (Story 5.1)
     
     // MARK: - Initialization
     
-    init(message: Message, isSentByCurrentUser: Bool, status: String = "", onRetry: (() -> Void)? = nil, isGroupChat: Bool = false, senderName: String? = nil, isOnline: Bool? = nil, readCount: Int = 0, shouldShowReadReceipt: Bool = false) {
+    init(
+        message: Message,
+        isSentByCurrentUser: Bool,
+        status: String = "",
+        onRetry: (() -> Void)? = nil,
+        isGroupChat: Bool = false,
+        senderName: String? = nil,
+        isOnline: Bool? = nil,
+        readCount: Int = 0,
+        shouldShowReadReceipt: Bool = false,
+        @ViewBuilder aiPrompt: () -> AIPrompt? = { nil }
+    ) {
         self.message = message
         self.isSentByCurrentUser = isSentByCurrentUser
         self.status = status.isEmpty ? message.status : status
@@ -32,6 +44,7 @@ struct MessageBubbleView: View {
         self.isOnline = isOnline
         self.readCount = readCount
         self.shouldShowReadReceipt = shouldShowReadReceipt
+        self.aiPrompt = aiPrompt()
     }
     
     // MARK: - Body
@@ -83,8 +96,13 @@ struct MessageBubbleView: View {
                 }
             }
             
-            // Timestamp and status indicator
+            // Timestamp, AI prompt, and status indicator (all on same line)
             HStack(spacing: 4) {
+                // AI Prompt (Story 5.1) - appears first, before timestamp
+                if let aiPrompt = aiPrompt {
+                    aiPrompt
+                }
+                
                 Text(formattedTimestamp)
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
@@ -210,7 +228,9 @@ struct MessageBubbleView: View {
             status: "sent"
         ),
         isSentByCurrentUser: true
-    )
+    ) {
+        EmptyView()
+    }
 }
 
 #Preview("Sending Message") {
@@ -224,7 +244,9 @@ struct MessageBubbleView: View {
             status: "sending"
         ),
         isSentByCurrentUser: true
-    )
+    ) {
+        EmptyView()
+    }
 }
 
 #Preview("Failed Message") {
@@ -241,7 +263,9 @@ struct MessageBubbleView: View {
         onRetry: {
             print("Retry tapped")
         }
-    )
+    ) {
+        EmptyView()
+    }
 }
 
 #Preview("Received Message") {
@@ -255,7 +279,9 @@ struct MessageBubbleView: View {
             status: "sent"
         ),
         isSentByCurrentUser: false
-    )
+    ) {
+        EmptyView()
+    }
 }
 
 #Preview("Long Message") {
@@ -269,6 +295,30 @@ struct MessageBubbleView: View {
             status: "sent"
         ),
         isSentByCurrentUser: true
-    )
+    ) {
+        EmptyView()
+    }
+}
+
+#Preview("Message with AI Prompt") {
+    MessageBubbleView(
+        message: Message(
+            id: "6",
+            messageId: "6",
+            senderId: "user1",
+            text: "Let's grab coffee tomorrow at 3pm",
+            timestamp: Date(),
+            status: "sent"
+        ),
+        isSentByCurrentUser: true
+    ) {
+        AIPromptButtonCompact(
+            icon: "calendar.badge.plus",
+            text: "Add to calendar",
+            tintColor: .blue
+        ) {
+            print("Add to calendar tapped")
+        }
+    }
 }
 

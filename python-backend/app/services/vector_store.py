@@ -37,6 +37,13 @@ class VectorStoreService:
             namespace="messages"
         )
         
+        # Create events vector store instance for event deduplication
+        self.events_store = PineconeVectorStore(
+            index=self.index,
+            embedding=self.embeddings,
+            namespace="events"
+        )
+        
         print(f"✅ VectorStoreService initialized with index: {self.index_name}")
     
     def add_message(
@@ -114,6 +121,76 @@ class VectorStoreService:
             Dictionary with index statistics
         """
         return self.index.describe_index_stats()
+    
+    def add_event(
+        self, 
+        event_id: str, 
+        text: str, 
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """
+        Add an event to the vector store for deduplication
+        
+        Args:
+            event_id: Unique identifier for the event
+            text: Event text (title + date for semantic matching)
+            metadata: Additional metadata (event details)
+        """
+        if metadata is None:
+            metadata = {}
+        
+        # Add event_id to metadata
+        metadata["event_id"] = event_id
+        metadata["type"] = "event"
+        
+        # Add to events vector store
+        self.events_store.add_texts(
+            texts=[text],
+            metadatas=[metadata],
+            ids=[event_id]
+        )
+    
+    def search_similar_events(
+        self, 
+        query: str, 
+        k: int = 3,
+        filter_dict: Optional[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for semantically similar events (for deduplication)
+        
+        Args:
+            query: Search query text (event title + date)
+            k: Number of results to return
+            filter_dict: Optional metadata filters (e.g., {"user_id": "123"})
+        
+        Returns:
+            List of similar events with content, metadata, and similarity scores
+        """
+        # Use similarity_search_with_score for deduplication threshold checking
+        results = self.events_store.similarity_search_with_score(
+            query=query,
+            k=k,
+            filter=filter_dict
+        )
+        
+        return [
+            {
+                "content": doc.page_content,
+                "metadata": doc.metadata,
+                "similarity": float(score)  # Cosine similarity score
+            }
+            for doc, score in results
+        ]
+    
+    def delete_event(self, event_id: str) -> None:
+        """
+        Delete an event from the vector store
+        
+        Args:
+            event_id: ID of the event to delete
+        """
+        self.index.delete(ids=[event_id], namespace="events")
 
 
 # Singleton instance

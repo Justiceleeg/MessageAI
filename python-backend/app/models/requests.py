@@ -13,14 +13,16 @@ class MessageAnalysisRequest(BaseModel):
     text: str = Field(..., description="Message text content")
     user_id: str = Field(..., description="User who sent the message")
     conversation_id: str = Field(..., description="Conversation identifier")
+    user_calendar: Optional[List[dict]] = Field(default=None, description="User's existing calendar events")
     
     class Config:
         json_schema_extra = {
             "example": {
                 "message_id": "msg_123",
-                "text": "I'm really excited about the project!",
+                "text": "Let's meet Friday at 3pm for coffee",
                 "user_id": "user_456",
-                "conversation_id": "conv_789"
+                "conversation_id": "conv_789",
+                "user_calendar": []
             }
         }
 
@@ -102,6 +104,46 @@ class AgentQueryRequest(BaseModel):
             "example": {
                 "conversation_id": "conv_789",
                 "query": "What was decided about the project timeline?"
+            }
+        }
+
+
+class EventCreateRequest(BaseModel):
+    """Request for creating an event with deduplication check"""
+    title: str = Field(..., description="Event title")
+    date: str = Field(..., description="Event date (ISO 8601)")
+    time: Optional[str] = Field(None, description="Event time (HH:MM format)")
+    location: Optional[str] = Field(None, description="Event location")
+    user_id: str = Field(..., description="User creating the event")
+    conversation_id: str = Field(..., description="Conversation where event was created")
+    message_id: str = Field(..., description="Message that created this event")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "title": "Coffee meeting",
+                "date": "2025-10-27",
+                "time": "15:00",
+                "location": "Starbucks",
+                "user_id": "user_123",
+                "conversation_id": "conv_456",
+                "message_id": "msg_789"
+            }
+        }
+
+
+class EventSearchRequest(BaseModel):
+    """Request for searching similar events"""
+    user_id: str = Field(..., description="User ID for filtering results")
+    query: str = Field(..., description="Search query (event title + date)")
+    k: int = Field(default=3, description="Number of results to return")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "user_id": "user_123",
+                "query": "Coffee meeting 2025-10-27",
+                "k": 3
             }
         }
 

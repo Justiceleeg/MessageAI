@@ -133,7 +133,7 @@ struct SettingsView: View {
     // MARK: - Actions
     
     private func handleLogout() async {
-        authViewModel.signOut()
+        await authViewModel.signOut()
         dismiss()
     }
     

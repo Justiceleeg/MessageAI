@@ -1,0 +1,12 @@
+// Configuration settings for MessageAI
+
+// Backend URL Configuration
+// Set AI_BACKEND_URL to override the default backend URL
+// Usage: Set as environment variable in Xcode scheme or use different .xcconfig files for Debug/Release
+
+// Example values:
+// Local development: http://127.0.0.1:8000
+// Production: https://messageai-backend-egkh.onrender.com
+
+AI_BACKEND_URL = 
+

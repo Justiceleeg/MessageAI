@@ -27,6 +27,10 @@ final class ChatViewModel: ObservableObject {
     @Published var otherUserDisplayName: String = ""
     @Published var senderNames: [String: String] = [:] // Cache for sender display names (userId -> displayName)
     
+    // AI Analysis (Story 5.1)
+    @Published var aiSuggestions: [String: MessageAnalysisResponse] = [:] // messageId -> analysis
+    @Published var dismissedAISuggestions: Set<String> = [] // messageIds where user acted on suggestion
+    
     // Presence tracking (Story 3.3)
     @Published var participantPresence: [String: Bool] = [:]  // userId -> isOnline
     @Published var participantLastSeen: [String: Date] = [:]  // userId -> lastSeen Date
@@ -43,6 +47,7 @@ final class ChatViewModel: ObservableObject {
     private let networkMonitor: NetworkMonitor
     private let offlineQueue: OfflineMessageQueue
     private let presenceService = PresenceService()  // Story 3.3
+    private let aiBackendService = AIBackendService.shared  // Story 5.1
     private let logger = Logger(subsystem: "com.jpw.message-ai", category: "ChatViewModel")
     private var messageListenerTask: Task<Void, Never>?
     private var networkObserverTask: Task<Void, Never>?
@@ -421,6 +426,9 @@ final class ChatViewModel: ObservableObject {
                 // The mergeMessages() will replace optimistic message when Firestore confirms
                 logger.info("Message sent to Firestore successfully: \(messageId)")
                 
+                // Analyze message for AI features in background (Story 5.1)
+                analyzeMessageForAI(optimisticMessage)
+                
             } else if let groupParticipants = pendingGroupParticipants {
                 // New group conversation - create group first, then send message
                 logger.info("Creating new group conversation with \(groupParticipants.count) participants")
@@ -457,6 +465,9 @@ final class ChatViewModel: ObservableObject {
                 // Start typing listener now that we have a conversationId (Story 3.5)
                 startTypingListening()
                 
+                // Analyze message for AI features in background (Story 5.1)
+                analyzeMessageForAI(optimisticMessage)
+                
             } else {
                 // New 1:1 conversation - create conversation with first message
                 logger.info("Creating new 1:1 conversation with first message")
@@ -477,6 +488,9 @@ final class ChatViewModel: ObservableObject {
                 
                 // Start typing listener now that we have a conversationId (Story 3.5)
                 startTypingListening()
+                
+                // Analyze message for AI features in background (Story 5.1)
+                analyzeMessageForAI(optimisticMessage)
             }
             
         } catch {
@@ -1312,6 +1326,48 @@ final class ChatViewModel: ObservableObject {
     func stopTypingOnSend() {
         guard let conversationId = conversationId else { return }
         presenceService.stopTyping(in: conversationId)
+    }
+    
+    // MARK: - AI Analysis (Story 5.1)
+    
+    /// Analyze a message for events, reminders, decisions, etc.
+    /// This happens in the background after the message is sent
+    /// - Parameter message: The message to analyze
+    func analyzeMessageForAI(_ message: Message) {
+        guard let currentUser = authService.currentUser else { return }
+        guard let conversationId = conversationId else { return }
+        
+        // Run analysis in background task
+        Task {
+            do {
+                logger.info("🤖 Analyzing message \(message.messageId) for AI features")
+                
+                let analysis = try await aiBackendService.analyzeMessage(
+                    messageId: message.messageId,
+                    text: message.text,
+                    userId: currentUser.userId,
+                    conversationId: conversationId,
+                    userCalendar: nil  // TODO: Pass user's calendar in future story
+                )
+                
+                // Update UI with analysis results
+                await MainActor.run {
+                    self.aiSuggestions[message.messageId] = analysis
+                    logger.info("✅ AI analysis complete for \(message.messageId). Calendar: \(analysis.calendar.detected), Reminder: \(analysis.reminder.detected), Decision: \(analysis.decision.detected)")
+                }
+                
+            } catch {
+                // Silent failure - don't disrupt user experience
+                logger.error("AI analysis failed for message \(message.messageId): \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    /// Dismiss AI suggestion after user acts on it
+    /// - Parameter messageId: The message ID whose suggestion should be dismissed
+    func dismissAISuggestion(for messageId: String) {
+        dismissedAISuggestions.insert(messageId)
+        logger.info("Dismissed AI suggestion for message: \(messageId)")
     }
 }
 

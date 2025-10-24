@@ -46,28 +46,134 @@ git clone https://github.com/Justiceleeg/MessageAI.git
 cd MessageAI
 ```
 
-### 2. Open the Project
+### 2. Configure Backend URL (IMPORTANT!)
+
+The app is configured to use **localhost** for development by default. If you want to use the **production backend**, you need to change the configuration:
+
+**Option A: Quick Change (For Testing Production Backend)**
+
+Open `ios-app/MessageAI/Utilities/Config.swift` and modify line 18:
+
+```swift
+// Change from:
+return "http://127.0.0.1:8000"  // Local development
+
+// To:
+return "https://messageai-backend-egkh.onrender.com"  // Production
+```
+
+**Option B: Proper Setup with Build Configurations (Recommended)**
+
+1. Open the Xcode project: `cd ios-app && open MessageAI.xcodeproj`
+2. In Project Navigator, verify these files exist:
+   - `Config.xcconfig`
+   - `Debug.xcconfig` (uses localhost)
+   - `Release.xcconfig` (uses production)
+3. Click on the **MessageAI project** (blue icon at top)
+4. Go to **Info** tab
+5. Under **Configurations**, set:
+   - **Debug** → `Debug.xcconfig`
+   - **Release** → `Release.xcconfig`
+6. Open `Info.plist` and add:
+   - Key: `AI_BACKEND_URL`
+   - Type: `String`
+   - Value: `$(AI_BACKEND_URL)`
+
+Now Debug builds automatically use localhost, Release builds use production! 🎉
+
+### 3. Open the Project
 
 ```bash
 cd ios-app
 open MessageAI.xcodeproj
 ```
 
-### 3. Install Dependencies
+### 4. Install Dependencies
 
 Xcode will automatically resolve Swift Package Manager dependencies when you open the project. If not, go to:
 - **File → Packages → Resolve Package Versions**
 
 Wait for the packages to download (first time may take a few minutes).
 
-### 4. Build and Run
+### 5. Build and Run
 
 1. Select a simulator or connected device from the scheme selector (e.g., iPhone 16)
 2. Press `Cmd + R` or click the Play button
 3. Wait for build to complete (first build may take a few minutes)
 4. The app will launch in the simulator or on your device
 
+**Check the console** for configuration info:
+```
+🔧 MessageAI Configuration
+   Environment: Development
+   Backend URL: https://messageai-backend-egkh.onrender.com
+   Debug Mode: true
+```
+
 **That's it!** The Firebase backend is already configured and ready to use.
+
+---
+
+## Local Development (Running Python Backend Locally)
+
+If you want to develop AI features locally instead of using the production backend:
+
+### 1. Set Up Python Backend
+
+```bash
+cd python-backend
+
+# Create virtual environment
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+### 2. Configure Environment Variables
+
+Create a `.env` file in `python-backend/`:
+
+```bash
+# Copy from example
+cp .env.example .env
+
+# Edit .env with your API keys:
+OPENAI_API_KEY=your_openai_key_here
+PINECONE_API_KEY=your_pinecone_key_here
+PINECONE_ENVIRONMENT=your_pinecone_env
+PINECONE_INDEX_NAME=messageai-vectors
+```
+
+### 3. Start Local Backend
+
+```bash
+# Make sure you're in python-backend directory
+python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+You should see:
+```
+INFO:     Uvicorn running on http://0.0.0.0:8000
+INFO:     Application startup complete.
+```
+
+### 4. Verify Backend is Running
+
+Open in browser: http://localhost:8000/docs
+
+You should see the FastAPI interactive documentation.
+
+### 5. Configure iOS App for Localhost
+
+The iOS app is **already configured to use localhost by default** in Debug mode! Just:
+
+1. Make sure backend is running (step 3 above)
+2. Build and run the iOS app in Xcode
+3. Check console for: `Backend URL: http://127.0.0.1:8000`
+
+**That's it!** Messages you send will be analyzed by your local AI backend.
 
 ---
 

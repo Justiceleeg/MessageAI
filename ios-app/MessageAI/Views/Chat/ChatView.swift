@@ -33,6 +33,11 @@ struct ChatView: View {
     @State private var showRetryActionSheet = false
     @State private var selectedMessageForRetry: Message?
     
+    // State for AI features (Story 5.1)
+    @State private var showEventCreationModal = false
+    @State private var selectedEventData: CalendarDetection?
+    @State private var selectedMessageId: String?
+    
     // MARK: - Initialization
     
     init(conversationId: String?, otherUserId: String, groupParticipants: [User]? = nil, groupName: String? = nil) {
@@ -134,6 +139,21 @@ struct ChatView: View {
                 Text(errorMessage)
             }
         }
+        .sheet(isPresented: $showEventCreationModal) {
+            if let eventData = selectedEventData,
+               let messageId = selectedMessageId,
+               let conversationId = conversationId {
+                EventCreationView(
+                    initialData: eventData,
+                    messageId: messageId,
+                    conversationId: conversationId
+                ) { event in
+                    // Event created successfully - dismiss AI prompt
+                    viewModel.dismissAISuggestion(for: messageId)
+                    print("Event created: \(event.title)")
+                }
+            }
+        }
     }
     
     // MARK: - Message List View
@@ -161,20 +181,58 @@ struct ChatView: View {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 8) {
                             ForEach(viewModel.messages) { message in
-                                MessageBubbleView(
-                                    message: message,
-                                    isSentByCurrentUser: viewModel.isSentByCurrentUser(message: message),
-                                    status: viewModel.computeMessageStatus(for: message),
-                                    onRetry: message.status == "failed" ? {
-                                        selectedMessageForRetry = message
-                                        showRetryActionSheet = true
-                                    } : nil,
-                                    isGroupChat: viewModel.conversation?.isGroupChat ?? false,
-                                    senderName: !viewModel.isSentByCurrentUser(message: message) ? viewModel.getSenderDisplayName(userId: message.senderId) : nil,
-                                    isOnline: viewModel.participantPresence[message.senderId],  // Story 3.3: Show online status in group chats
-                                    readCount: viewModel.calculateReadCount(for: message),  // Story 4.1: Read receipt count
-                                    shouldShowReadReceipt: viewModel.shouldShowReadReceipt(for: message)  // Story 4.1: Only show on latest
-                                )
+                                VStack(alignment: .leading, spacing: 0) {
+                                    MessageBubbleView(
+                                        message: message,
+                                        isSentByCurrentUser: viewModel.isSentByCurrentUser(message: message),
+                                        status: viewModel.computeMessageStatus(for: message),
+                                        onRetry: message.status == "failed" ? {
+                                            selectedMessageForRetry = message
+                                            showRetryActionSheet = true
+                                        } : nil,
+                                        isGroupChat: viewModel.conversation?.isGroupChat ?? false,
+                                        senderName: !viewModel.isSentByCurrentUser(message: message) ? viewModel.getSenderDisplayName(userId: message.senderId) : nil,
+                                        isOnline: viewModel.participantPresence[message.senderId],  // Story 3.3: Show online status in group chats
+                                        readCount: viewModel.calculateReadCount(for: message),  // Story 4.1: Read receipt count
+                                        shouldShowReadReceipt: viewModel.shouldShowReadReceipt(for: message)  // Story 4.1: Only show on latest
+                                    ) {
+                                        // AI Prompt (Story 5.1) - Inline with timestamp
+                                        // Only show if not dismissed
+                                        if viewModel.isSentByCurrentUser(message: message),
+                                           let analysis = viewModel.aiSuggestions[message.messageId],
+                                           !viewModel.dismissedAISuggestions.contains(message.messageId) {
+                                            Group {
+                                                if analysis.calendar.detected {
+                                                    AIPromptButtonCompact(
+                                                        icon: "calendar.badge.plus",
+                                                        text: "Add to calendar",
+                                                        tintColor: .blue
+                                                    ) {
+                                                        selectedEventData = analysis.calendar
+                                                        selectedMessageId = message.messageId
+                                                        showEventCreationModal = true
+                                                    }
+                                                } else if analysis.reminder.detected {
+                                                    AIPromptButtonCompact(
+                                                        icon: "bell.badge.fill",
+                                                        text: "Set reminder",
+                                                        tintColor: .orange
+                                                    ) {
+                                                        print("Add reminder: \(analysis.reminder)")
+                                                    }
+                                                } else if analysis.decision.detected {
+                                                    AIPromptButtonCompact(
+                                                        icon: "checkmark.circle.fill",
+                                                        text: "Save decision",
+                                                        tintColor: .green
+                                                    ) {
+                                                        print("Save decision: \(analysis.decision)")
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                                 .id(message.id)
                                 .onAppear {
                                     // Mark message as read when it appears (Story 3.2)

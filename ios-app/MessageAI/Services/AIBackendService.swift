@@ -10,13 +10,9 @@ import Foundation
 /// Service for communicating with the AI backend
 class AIBackendService {
     
-    // MARK: - Configuration
+    // MARK: - Singleton
     
-    /// Production backend URL (update this with your Render.com URL)
-    static let productionURL = "https://messageai-backend-egkh.onrender.com"
-    
-    /// Local development URL
-    static let localURL = "http://localhost:8000"
+    static let shared = AIBackendService()
     
     // MARK: - Properties
     
@@ -25,9 +21,9 @@ class AIBackendService {
     
     // MARK: - Initialization
     
-    /// Initialize with base URL (defaults to production)
-    /// - Parameter baseURL: Backend server URL
-    init(baseURL: String = AIBackendService.productionURL) {
+    /// Initialize with base URL (defaults to environment-based config)
+    /// - Parameter baseURL: Backend server URL (defaults to Config.backendURL)
+    init(baseURL: String = Config.backendURL) {
         self.baseURL = baseURL
         
         // Configure URLSession with timeout
@@ -129,6 +125,91 @@ class AIBackendService {
         
         return try decoder.decode(T.self, from: data)
     }
+    
+    // MARK: - Message Analysis
+    
+    /// Analyze a message for events, reminders, decisions, RSVPs, priority, and conflicts
+    /// - Parameters:
+    ///   - messageId: Unique message identifier
+    ///   - text: Message text to analyze
+    ///   - userId: User who sent the message
+    ///   - conversationId: Conversation identifier
+    ///   - userCalendar: Optional array of user's existing events for conflict detection
+    /// - Returns: MessageAnalysisResponse with all detections
+    /// - Throws: AIBackendError if request fails
+    func analyzeMessage(
+        messageId: String,
+        text: String,
+        userId: String,
+        conversationId: String,
+        userCalendar: [String]? = nil  // Simplified for MVP
+    ) async throws -> MessageAnalysisResponse {
+        let request = MessageAnalysisRequest(
+            messageId: messageId,
+            text: text,
+            userId: userId,
+            conversationId: conversationId,
+            userCalendar: userCalendar
+        )
+        
+        return try await post(endpoint: "/api/v1/analyze-message", body: request)
+    }
+    
+    // MARK: - Event Management
+    
+    /// Create an event with automatic deduplication check
+    /// - Parameters:
+    ///   - title: Event title
+    ///   - date: Event date (ISO 8601 string)
+    ///   - time: Event time (HH:MM string, optional)
+    ///   - location: Event location (optional)
+    ///   - userId: User creating the event
+    ///   - conversationId: Conversation where event was created
+    ///   - messageId: Message that created the event
+    /// - Returns: EventCreateResponse with success status and deduplication info
+    /// - Throws: AIBackendError if request fails
+    func createEvent(
+        title: String,
+        date: String,
+        time: String?,
+        location: String?,
+        userId: String,
+        conversationId: String,
+        messageId: String
+    ) async throws -> EventCreateResponse {
+        let request = EventCreateRequest(
+            title: title,
+            date: date,
+            time: time,
+            location: location,
+            userId: userId,
+            conversationId: conversationId,
+            messageId: messageId
+        )
+        
+        return try await post(endpoint: "/api/v1/events/create", body: request)
+    }
+    
+    /// Search for similar events
+    /// - Parameters:
+    ///   - userId: User ID for filtering results
+    ///   - query: Search query (event title + date)
+    ///   - k: Number of results to return (default 3)
+    /// - Returns: EventSearchResponse with similar events
+    /// - Throws: AIBackendError if request fails
+    func searchEvents(
+        userId: String,
+        query: String,
+        k: Int = 3
+    ) async throws -> EventSearchResponse {
+        let request = EventSearchRequest(
+            userId: userId,
+            query: query,
+            k: k
+        )
+        
+        return try await post(endpoint: "/api/v1/events/search", body: request)
+    }
 }
 
 // MARK: - Response Models
@@ -153,6 +234,121 @@ struct PineconeStats: Codable {
     let dimensions: Int?
     let totalVectorCount: Int?
     let namespaces: [String]?
+}
+
+// MARK: - Request Models
+
+/// Message analysis request
+struct MessageAnalysisRequest: Codable {
+    let messageId: String
+    let text: String
+    let userId: String
+    let conversationId: String
+    let userCalendar: [String]? // Simplified - not used in MVP
+}
+
+/// Event create request
+struct EventCreateRequest: Codable {
+    let title: String
+    let date: String
+    let time: String?
+    let location: String?
+    let userId: String
+    let conversationId: String
+    let messageId: String
+}
+
+/// Event search request
+struct EventSearchRequest: Codable {
+    let userId: String
+    let query: String
+    let k: Int
+}
+
+// MARK: - Analysis Response Models
+
+/// Message analysis response
+struct MessageAnalysisResponse: Codable {
+    let messageId: String
+    let calendar: CalendarDetection
+    let reminder: ReminderDetection
+    let decision: DecisionDetection
+    let rsvp: RSVPDetection
+    let priority: PriorityDetection
+    let conflict: ConflictDetection
+}
+
+/// Calendar event detection
+struct CalendarDetection: Codable {
+    let detected: Bool
+    let title: String?
+    let date: String?  // ISO 8601
+    let time: String?  // HH:MM
+    let location: String?
+}
+
+/// Reminder detection
+struct ReminderDetection: Codable {
+    let detected: Bool
+    let title: String?
+    let dueDate: String?  // ISO 8601
+}
+
+/// Decision detection
+struct DecisionDetection: Codable {
+    let detected: Bool
+    let text: String?
+}
+
+/// RSVP detection
+struct RSVPDetection: Codable {
+    let detected: Bool
+    let status: String?  // "accepted" or "declined"
+    let eventReference: String?
+}
+
+/// Priority detection
+struct PriorityDetection: Codable {
+    let detected: Bool
+    let level: String?  // "low", "medium", "high"
+}
+
+/// Conflict detection
+struct ConflictDetection: Codable {
+    let detected: Bool
+    let conflictingEvents: [String]
+}
+
+// MARK: - Event Response Models
+
+/// Event create response
+struct EventCreateResponse: Codable {
+    let success: Bool
+    let eventId: String?
+    let suggestLink: Bool
+    let similarEvent: SimilarEvent?
+    let message: String
+}
+
+/// Similar event info
+struct SimilarEvent: Codable {
+    let eventId: String?
+    let title: String?
+    let date: String?
+    let similarity: Double?
+}
+
+/// Event search response
+struct EventSearchResponse: Codable {
+    let results: [EventSearchResult]
+}
+
+/// Event search result
+struct EventSearchResult: Codable {
+    let eventId: String
+    let title: String
+    let date: String
+    let similarity: Double
 }
 
 // MARK: - Error Types

@@ -1,0 +1,6 @@
+// Release Configuration
+#include "Config.xcconfig"
+
+// Use production backend for release builds
+AI_BACKEND_URL = https:/$()/messageai-backend-egkh.onrender.com
+
