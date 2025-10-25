@@ -266,6 +266,84 @@ class AIBackendService {
         
         return try decoder.decode(DecisionSearchResponse.self, from: data)
     }
+    
+    // MARK: - Reminder Management (Story 5.5)
+    
+    /// Store reminder vector embedding in Pinecone
+    /// - Parameter request: Reminder vector storage request
+    /// - Returns: ReminderVectorResponse with success status
+    /// - Throws: AIBackendError if request fails
+    func storeReminderVector(_ request: ReminderVectorRequest) async throws -> ReminderVectorResponse {
+        return try await post(endpoint: "/api/v1/reminders/vector", body: request)
+    }
+    
+    /// Search reminders using semantic search
+    /// - Parameters:
+    ///   - query: Search query
+    ///   - userId: User ID for filtering results
+    ///   - limit: Number of results to return (default 10)
+    /// - Returns: ReminderSearchResponse with search results
+    /// - Throws: AIBackendError if request fails
+    func searchReminders(
+        query: String,
+        userId: String,
+        limit: Int = 10
+    ) async throws -> ReminderSearchResponse {
+        var urlComponents = URLComponents(string: "\(baseURL)/api/v1/reminders/search")!
+        urlComponents.queryItems = [
+            URLQueryItem(name: "query", value: query),
+            URLQueryItem(name: "user_id", value: userId),
+            URLQueryItem(name: "limit", value: "\(limit)")
+        ]
+        
+        guard let url = urlComponents.url else {
+            throw AIBackendError.invalidURL
+        }
+        
+        let (data, response) = try await session.data(from: url)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AIBackendError.invalidResponse
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            throw AIBackendError.httpError(statusCode: httpResponse.statusCode)
+        }
+        
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        
+        return try decoder.decode(ReminderSearchResponse.self, from: data)
+    }
+    
+    /// Delete reminder vector from Pinecone
+    /// - Parameter reminderId: Reminder ID to delete
+    /// - Returns: ReminderVectorResponse with success status
+    /// - Throws: AIBackendError if request fails
+    func deleteReminderVector(_ reminderId: String) async throws -> ReminderVectorResponse {
+        let endpoint = "\(baseURL)/api/v1/reminders/vector/\(reminderId)"
+        guard let url = URL(string: endpoint) else {
+            throw AIBackendError.invalidURL
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        
+        let (data, response) = try await session.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AIBackendError.invalidResponse
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            throw AIBackendError.httpError(statusCode: httpResponse.statusCode)
+        }
+        
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        
+        return try decoder.decode(ReminderVectorResponse.self, from: data)
+    }
 }
 
 // MARK: - Response Models
@@ -432,6 +510,44 @@ struct DecisionSearchResult: Codable {
     let conversationId: String
     let messageId: String
     let timestamp: String
+    let similarity: Double
+}
+
+// MARK: - Reminder Request Models (Story 5.5)
+
+/// Reminder vector storage request
+struct ReminderVectorRequest: Codable {
+    let reminderId: String
+    let title: String
+    let userId: String
+    let conversationId: String
+    let sourceMessageId: String
+    let dueDate: String
+    let timestamp: String
+}
+
+// MARK: - Reminder Response Models (Story 5.5)
+
+/// Reminder vector response
+struct ReminderVectorResponse: Codable {
+    let success: Bool
+    let reminderId: String?
+    let message: String
+}
+
+/// Reminder search response
+struct ReminderSearchResponse: Codable {
+    let results: [ReminderSearchResult]
+}
+
+/// Reminder search result
+struct ReminderSearchResult: Codable, Identifiable {
+    var id: String { reminderId }
+    let reminderId: String
+    let title: String
+    let dueDate: String
+    let conversationId: String
+    let sourceMessageId: String
     let similarity: Double
 }
 

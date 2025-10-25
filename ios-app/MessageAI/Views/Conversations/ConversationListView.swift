@@ -22,7 +22,8 @@ struct ConversationListView: View {
     @State private var showNewMessage: Bool = false
     @State private var showNewGroupChat: Bool = false
     @State private var showGlobalDecisions: Bool = false  // NEW - Story 5.2 AC6
-    @State private var showCalendar: Bool = false  // NEW - Story 5.1.5
+    @State private var showGlobalReminders: Bool = false  // NEW - Story 5.5
+    @State private var showGlobalEvents: Bool = false  // NEW - Story 5.1
     @State private var navigationPath = NavigationPath()
     @State private var pendingNavigationConversationId: String?
     @State private var pendingNavigationMessageId: String?
@@ -100,16 +101,28 @@ struct ConversationListView: View {
                     .accessibilityHint("Open settings and account options")
                 }
                 
-                // Calendar button (Story 5.1.5)
+                // Global Events button (Story 5.1)
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: {
-                        showCalendar = true
+                        showGlobalEvents = true
                     }) {
                         Image(systemName: "calendar")
                             .foregroundStyle(.blue)
                     }
-                    .accessibilityLabel("Calendar")
-                    .accessibilityHint("View events and reminders")
+                    .accessibilityLabel("All Events")
+                    .accessibilityHint("View all events across conversations")
+                }
+                
+                // Global Reminders button (Story 5.5)
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: {
+                        showGlobalReminders = true
+                    }) {
+                        Image(systemName: "bell")
+                            .foregroundStyle(.orange)
+                    }
+                    .accessibilityLabel("All Reminders")
+                    .accessibilityHint("View all reminders across conversations")
                 }
                 
                 // Global Decisions button (Story 5.2 AC6)
@@ -170,11 +183,17 @@ struct ConversationListView: View {
                     DecisionsListView(conversationId: nil)
                 }
             }
-            .sheet(isPresented: $showCalendar) {
-                // Calendar View (Story 5.1.5)
+            .sheet(isPresented: $showGlobalEvents) {
+                // Global Events View (Story 5.1)
                 NavigationStack {
-                    CalendarView()
+                    CalendarView(conversationId: nil)
                         .environmentObject(authViewModel)
+                }
+            }
+            .sheet(isPresented: $showGlobalReminders) {
+                // Global Reminders View (Story 5.5)
+                NavigationStack {
+                    ChatRemindersView(conversationId: nil)
                 }
             }
             .alert("Error", isPresented: .constant(viewModel.errorMessage != nil)) {
@@ -215,7 +234,8 @@ struct ConversationListView: View {
                     }
                     
                     // Dismiss any open sheets first
-                    showCalendar = false
+                    showGlobalEvents = false
+                    showGlobalReminders = false
                     showGlobalDecisions = false
                     
                     // Store the message ID for highlighting

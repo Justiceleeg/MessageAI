@@ -52,6 +52,13 @@ class VectorStoreService:
             namespace="decisions"
         )
         
+        # Create reminders vector store instance for reminder tracking (Story 5.5)
+        self.reminders_store = PineconeVectorStore.from_existing_index(
+            index_name=self.index_name,
+            embedding=self.embeddings,
+            namespace="reminders"
+        )
+        
         print(f"✅ VectorStoreService initialized with index: {self.index_name}")
     
     def add_message(
@@ -278,6 +285,70 @@ class VectorStoreService:
             decision_id: ID of the decision to delete
         """
         self.index.delete(ids=[decision_id], namespace="decisions")
+    
+    def add_vector(
+        self, 
+        vector_id: str, 
+        embedding: List[float], 
+        metadata: Dict[str, Any], 
+        namespace: str
+    ) -> None:
+        """
+        Add a vector directly to Pinecone (for reminders, events, decisions)
+        
+        Args:
+            vector_id: Unique identifier for the vector
+            embedding: Vector embedding
+            metadata: Vector metadata
+            namespace: Pinecone namespace
+        """
+        self.index.upsert(
+            vectors=[{
+                "id": vector_id,
+                "values": embedding,
+                "metadata": metadata
+            }],
+            namespace=namespace
+        )
+    
+    def search_vectors(
+        self, 
+        query_embedding: List[float], 
+        namespace: str, 
+        filter_dict: Optional[Dict[str, Any]] = None,
+        top_k: int = 10
+    ) -> List[Any]:
+        """
+        Search vectors in Pinecone
+        
+        Args:
+            query_embedding: Query vector embedding
+            namespace: Pinecone namespace
+            filter_dict: Optional metadata filters
+            top_k: Number of results to return
+        
+        Returns:
+            List of search results with metadata and scores
+        """
+        results = self.index.query(
+            vector=query_embedding,
+            namespace=namespace,
+            filter=filter_dict,
+            top_k=top_k,
+            include_metadata=True
+        )
+        
+        return results.matches
+    
+    def delete_vector(self, vector_id: str, namespace: str) -> None:
+        """
+        Delete a vector from Pinecone
+        
+        Args:
+            vector_id: ID of the vector to delete
+            namespace: Pinecone namespace
+        """
+        self.index.delete(ids=[vector_id], namespace=namespace)
 
 
 # Singleton instance

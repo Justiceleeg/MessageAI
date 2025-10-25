@@ -17,21 +17,16 @@ struct CalendarView: View {
     let conversationId: String?
     
     private let eventService = EventService()
-    private let reminderService = ReminderService()
     @EnvironmentObject private var authViewModel: AuthViewModel
     
-    @State private var selectedTab: CalendarTab = .events
     @State private var events: [Event] = []
-    @State private var reminders: [Reminder] = []
     @State private var selectedDate: Date = Date()
     @State private var selectedEvent: Event?
-    @State private var selectedReminder: Reminder?
     @State private var isLoading = true
     @State private var errorMessage: String?
     
     // Firestore listeners
     @State private var eventListener: ListenerRegistration?
-    @State private var reminderListener: ListenerRegistration?
     
     // MARK: - Initialization
     
@@ -41,7 +36,6 @@ struct CalendarView: View {
     
     enum CalendarTab: String, CaseIterable {
         case events = "Events"
-        case reminders = "Reminders"
     }
     
     // MARK: - Body
@@ -49,16 +43,7 @@ struct CalendarView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // Tab selector
-                Picker("View", selection: $selectedTab) {
-                    ForEach(CalendarTab.allCases, id: \.self) { tab in
-                        Text(tab.rawValue).tag(tab)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .padding()
-                
-                // Content based on selected tab
+                // Content
                 if isLoading {
                     loadingView
                 } else if let error = errorMessage {
@@ -71,13 +56,6 @@ struct CalendarView: View {
             .sheet(item: $selectedEvent) { event in
                 EventDetailView(event: event, onDelete: {
                     deleteEvent(event)
-                })
-            }
-            .sheet(item: $selectedReminder) { reminder in
-                ReminderDetailView(reminder: reminder, onDelete: {
-                    deleteReminder(reminder)
-                }, onMarkComplete: {
-                    markReminderComplete(reminder)
                 })
             }
             .onAppear {
@@ -93,28 +71,13 @@ struct CalendarView: View {
     
     @ViewBuilder
     private var contentView: some View {
-        if selectedTab == .events {
-            EventsCalendarView(
-                events: events,
-                selectedDate: $selectedDate,
-                onEventTap: { event in
-                    selectedEvent = event
-                }
-            )
-        } else {
-            RemindersListView(
-                reminders: reminders,
-                onReminderTap: { reminder in
-                    selectedReminder = reminder
-                },
-                onMarkComplete: { reminder in
-                    markReminderComplete(reminder)
-                },
-                onDelete: { reminder in
-                    deleteReminder(reminder)
-                }
-            )
-        }
+        EventsCalendarView(
+            events: events,
+            selectedDate: $selectedDate,
+            onEventTap: { event in
+                selectedEvent = event
+            }
+        )
     }
     
     private var loadingView: some View {
@@ -166,19 +129,13 @@ struct CalendarView: View {
         Task {
             do {
                 // Use listAllUserEvents to get both created and attended events (Story 5.4)
-                async let eventsTask = eventService.listAllUserEvents(userId: userId)
-                async let remindersTask = reminderService.listReminders(userId: userId)
-                
-                let allEvents = try await eventsTask
-                let allReminders = try await remindersTask
+                let allEvents = try await eventService.listAllUserEvents(userId: userId)
                 
                 // Filter by conversationId if provided
                 if let conversationId = conversationId {
                     events = allEvents.filter { $0.createdInConversationId == conversationId }
-                    reminders = allReminders.filter { $0.conversationId == conversationId }
                 } else {
                     events = allEvents
-                    reminders = allReminders
                 }
                 
                 isLoading = false
@@ -203,22 +160,11 @@ struct CalendarView: View {
                 events = updatedEvents
             }
         }
-        
-        reminderListener = reminderService.observeUserReminders(userId: userId) { updatedReminders in
-            // Filter by conversationId if provided
-            if let conversationId = conversationId {
-                reminders = updatedReminders.filter { $0.conversationId == conversationId }
-            } else {
-                reminders = updatedReminders
-            }
-        }
     }
     
     private func removeListeners() {
         eventListener?.remove()
-        reminderListener?.remove()
         eventListener = nil
-        reminderListener = nil
     }
     
     // MARK: - Actions
@@ -240,27 +186,6 @@ struct CalendarView: View {
         }
     }
     
-    private func deleteReminder(_ reminder: Reminder) {
-        Task {
-            do {
-                try await reminderService.deleteReminder(id: reminder.reminderId)
-                selectedReminder = nil
-            } catch {
-                errorMessage = "Failed to delete reminder: \(error.localizedDescription)"
-            }
-        }
-    }
-    
-    private func markReminderComplete(_ reminder: Reminder) {
-        Task {
-            do {
-                try await reminderService.markComplete(reminderId: reminder.reminderId)
-                selectedReminder = nil
-            } catch {
-                errorMessage = "Failed to mark reminder complete: \(error.localizedDescription)"
-            }
-        }
-    }
 }
 
 // MARK: - Preview

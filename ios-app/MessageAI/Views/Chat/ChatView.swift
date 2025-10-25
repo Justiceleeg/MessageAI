@@ -49,8 +49,13 @@ struct ChatView: View {
     @State private var showEventInvitationModal = false
     @State private var selectedInvitationData: InvitationDetection?
     
+    // State for reminder features (Story 5.5)
+    @State private var showReminderCreationModal = false
+    @State private var selectedReminderData: ReminderDetection?
+    
     @State private var showPerChatDecisions = false  // NEW - Story 5.2 AC5
     @State private var showCalendar = false  // NEW - Story 5.1.5
+    @State private var showPerChatReminders = false  // NEW - Story 5.5 AC5
     
     // Message highlighting state (Story 5.1.6)
     @State private var highlightedMessageId: String? = nil
@@ -158,6 +163,18 @@ struct ChatView: View {
                 .accessibilityLabel("Chat Decisions")
                 .accessibilityHint("View decisions from this conversation")
             }
+            
+            // Per-Chat Reminders button (Story 5.5 AC5)
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button(action: {
+                    showPerChatReminders = true
+                }) {
+                    Image(systemName: "bell")
+                        .foregroundStyle(.orange)
+                }
+                .accessibilityLabel("Chat Reminders")
+                .accessibilityHint("View reminders from this conversation")
+            }
         }
         .onAppear {
             viewModel.onAppear()
@@ -228,6 +245,22 @@ struct ChatView: View {
                 }
             }
         }
+        .sheet(isPresented: $showReminderCreationModal) {
+            if let reminderData = selectedReminderData,
+               let messageId = selectedMessageId,
+               let conversationId = conversationId,
+               let analysis = viewModel.aiSuggestions[messageId] {
+                ReminderCreationModal(
+                    analysis: analysis,
+                    messageId: messageId,
+                    conversationId: conversationId
+                ) { reminder in
+                    // Reminder created successfully - dismiss AI prompt
+                    viewModel.dismissAISuggestion(for: messageId)
+                    print("Reminder created: \(reminder.title)")
+                }
+            }
+        }
         .sheet(isPresented: $showPerChatDecisions) {
             // Per-Chat Decisions View (Story 5.2 AC5)
             if let conversationId = conversationId {
@@ -242,6 +275,12 @@ struct ChatView: View {
             NavigationStack {
                 CalendarView(conversationId: conversationId)
                     .environmentObject(authViewModel)
+            }
+        }
+        .sheet(isPresented: $showPerChatReminders) {
+            // Per-Chat Reminders View (Story 5.5 AC5)
+            if let conversationId = conversationId {
+                ChatRemindersView(conversationId: conversationId)
             }
         }
     }
@@ -329,7 +368,9 @@ struct ChatView: View {
                                                         text: "Set reminder",
                                                         tintColor: .orange
                                                     ) {
-                                                        print("Add reminder: \(analysis.reminder)")
+                                                        selectedReminderData = analysis.reminder
+                                                        selectedMessageId = message.messageId
+                                                        showReminderCreationModal = true
                                                     }
                                                 } else if analysis.decision.detected {
                                                     AIPromptButtonCompact(

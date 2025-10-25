@@ -163,21 +163,15 @@ class EventService {
     private func listAttendedEventsAlternative(userId: String) async throws -> [Event] {
         logger.info("Listing attended events for user (alternative method): \(userId)")
         
-        do {
-            // Since we can't query all events due to security rules, we need a different approach
-            // For now, we'll return an empty array and rely on the user's created events
-            // In a production app, you might want to:
-            // 1. Store user's attended events in a separate collection
-            // 2. Use cloud functions to maintain this list
-            // 3. Or modify the security rules to allow broader access
-            
-            logger.info("Alternative attended events method - returning empty array for now")
-            return []
-            
-        } catch {
-            logger.error("Failed to list attended events (alternative): \(error.localizedDescription)")
-            throw error
-        }
+        // Since we can't query all events due to security rules, we need a different approach
+        // For now, we'll return an empty array and rely on the user's created events
+        // In a production app, you might want to:
+        // 1. Store user's attended events in a separate collection
+        // 2. Use cloud functions to maintain this list
+        // 3. Or modify the security rules to allow broader access
+        
+        logger.info("Alternative attended events method - returning empty array for now")
+        return []
     }
     
     /// Lists all events for a conversation
@@ -322,14 +316,13 @@ class EventService {
         do {
             let firestoreService = FirestoreService()
             let messageId = UUID().uuidString
-            let timestamp = Date()
             
             // Create RSVP message with badge
             let rsvpBadge = status == .accepted ? "✅" : "❌"
             let rsvpText = "\(rsvpBadge) \(message)"
             
             // Post message to conversation
-            try await firestoreService.sendMessage(
+            _ = try await firestoreService.sendMessage(
                 conversationId: conversationId,
                 senderId: userId,
                 text: rsvpText,
@@ -513,7 +506,7 @@ class EventService {
             let eventRef = db.collection(eventsCollection).document(eventId)
             let eventDoc = try await eventRef.getDocument()
             
-            guard eventDoc.exists, var event = try? eventDoc.data(as: Event.self) else {
+            guard eventDoc.exists, let event = try? eventDoc.data(as: Event.self) else {
                 throw NSError(domain: "EventService", code: 404, userInfo: [NSLocalizedDescriptionKey: "Event not found"])
             }
             

@@ -424,6 +424,96 @@ class NotificationManager: NSObject {
             scheduleLocalNotification(conversationId: conversationId, title: title, body: messageText, priority: priority)
         }
     }
+    
+    // MARK: - Reminder Notifications (Story 5.5)
+    
+    /// Schedules a reminder notification
+    /// - Parameters:
+    ///   - reminder: Reminder to schedule
+    ///   - timing: Reminder timing option
+    /// - Returns: Notification ID for tracking
+    /// - Throws: Error if scheduling fails
+    func scheduleReminderNotification(
+        reminder: Reminder,
+        timing: ReminderTiming
+    ) async throws -> String {
+        print("NotificationManager: Scheduling reminder notification for: \(reminder.title)")
+        
+        // Calculate trigger date based on timing option
+        let triggerDate = calculateTriggerDate(dueDate: reminder.dueDate, timing: timing)
+        
+        // Create notification content
+        let content = UNMutableNotificationContent()
+        content.title = "Reminder"
+        content.body = reminder.title
+        content.sound = .default
+        content.userInfo = [
+            "reminderId": reminder.reminderId,
+            "conversationId": reminder.conversationId,
+            "messageId": reminder.sourceMessageId,
+            "type": "reminder"
+        ]
+        
+        // Create calendar trigger
+        let trigger = UNCalendarNotificationTrigger(
+            dateMatching: Calendar.current.dateComponents(
+                [.year, .month, .day, .hour, .minute],
+                from: triggerDate
+            ),
+            repeats: false
+        )
+        
+        // Create notification request
+        let request = UNNotificationRequest(
+            identifier: reminder.reminderId,
+            content: content,
+            trigger: trigger
+        )
+        
+        // Schedule notification
+        try await UNUserNotificationCenter.current().add(request)
+        
+        print("NotificationManager: Reminder notification scheduled for: \(triggerDate)")
+        return reminder.reminderId
+    }
+    
+    /// Cancels a notification by ID
+    /// - Parameter notificationId: Notification ID to cancel
+    func cancelNotification(_ notificationId: String) async {
+        print("NotificationManager: Cancelling notification: \(notificationId)")
+        
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [notificationId])
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [notificationId])
+        
+        print("NotificationManager: Notification cancelled: \(notificationId)")
+    }
+    
+    /// Calculates trigger date based on reminder timing
+    /// - Parameters:
+    ///   - dueDate: Original due date
+    ///   - timing: Reminder timing option
+    /// - Returns: Calculated trigger date
+    private func calculateTriggerDate(dueDate: Date, timing: ReminderTiming) -> Date {
+        let calendar = Calendar.current
+        
+        switch timing {
+        case .atDueTime:
+            return dueDate
+            
+        case .oneHourBefore:
+            return calendar.date(byAdding: .hour, value: -1, to: dueDate) ?? dueDate
+            
+        case .morningOf:
+            // Set to 9:00 AM on the due date
+            let components = calendar.dateComponents([.year, .month, .day], from: dueDate)
+            var morningComponents = components
+            morningComponents.hour = 9
+            morningComponents.minute = 0
+            morningComponents.second = 0
+            
+            return calendar.date(from: morningComponents) ?? dueDate
+        }
+    }
 }
 
 // MARK: - UNUserNotificationCenterDelegate
