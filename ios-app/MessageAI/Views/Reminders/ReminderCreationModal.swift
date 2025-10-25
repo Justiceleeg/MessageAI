@@ -219,7 +219,8 @@ enum ReminderTiming: String, CaseIterable {
                 title: nil,
                 date: nil,
                 time: nil,
-                location: nil
+                location: nil,
+                isInvitation: false
             ),
             reminder: ReminderDetection(
                 detected: true,
@@ -234,12 +235,6 @@ enum ReminderTiming: String, CaseIterable {
                 detected: false,
                 status: nil,
                 eventReference: nil
-            ),
-            invitation: InvitationDetection(
-                detected: false,
-                type: nil,
-                eventTitle: nil,
-                invitationDetected: false
             ),
             priority: PriorityDetection(
                 detected: false,

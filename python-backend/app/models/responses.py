@@ -181,6 +181,7 @@ class CalendarDetection(BaseModel):
     date: Optional[str] = Field(None, description="Event date (ISO 8601)")
     time: Optional[str] = Field(None, description="Event time (HH:MM)")
     location: Optional[str] = Field(None, description="Event location")
+    is_invitation: bool = Field(False, description="Whether this event contains invitation language")
 
 
 class ReminderDetection(BaseModel):
@@ -231,7 +232,6 @@ class MessageAnalysisResponse(BaseModel):
     reminder: ReminderDetection
     decision: DecisionDetection
     rsvp: RSVPDetection
-    invitation: InvitationDetection
     priority: PriorityDetection
     conflict: ConflictDetection
     
@@ -244,12 +244,12 @@ class MessageAnalysisResponse(BaseModel):
                     "title": "Coffee meeting",
                     "date": "2025-10-27",
                     "time": "15:00",
-                    "location": "Starbucks"
+                    "location": "Starbucks",
+                    "is_invitation": False
                 },
                 "reminder": {"detected": False},
                 "decision": {"detected": False},
                 "rsvp": {"detected": False},
-                "invitation": {"detected": False, "type": None, "eventTitle": None, "invitationDetected": False},
                 "priority": {"detected": False},
                 "conflict": {"detected": False, "conflicting_events": []}
             }

@@ -378,7 +378,7 @@ class FirestoreService: ObservableObject {
             )
         }
         
-        logger.info("Fetched \(messages.count) messages for conversationId: \(conversationId)")
+        // logger.info("Fetched \(messages.count) messages for conversationId: \(conversationId)")
         return messages
     }
 
@@ -455,8 +455,7 @@ class FirestoreService: ObservableObject {
                         )
                     }
 
-                    self.logger.info(
-                        "Fetched \(messages.count) messages for conversationId: \(conversationId)")
+                    // self.logger.info("Fetched \(messages.count) messages for conversationId: \(conversationId)")
                     continuation.yield(messages)
                 }
 

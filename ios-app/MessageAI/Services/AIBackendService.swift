@@ -55,7 +55,7 @@ class AIBackendService {
         }
         
         let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        // Note: Using CodingKeys for field mapping instead of convertFromSnakeCase
         
         return try decoder.decode(HealthResponse.self, from: data)
     }
@@ -82,7 +82,7 @@ class AIBackendService {
         }
         
         let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        // Note: Using CodingKeys for field mapping instead of convertFromSnakeCase
         
         return try decoder.decode(ServiceTestResponse.self, from: data)
     }
@@ -121,7 +121,7 @@ class AIBackendService {
         }
         
         let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        // Note: Using CodingKeys for field mapping instead of convertFromSnakeCase
         
         return try decoder.decode(T.self, from: data)
     }
@@ -162,7 +162,12 @@ class AIBackendService {
             userCalendar: userCalendar
         )
         
-        return try await post(endpoint: "/api/v1/analyze-message", body: request)
+        do {
+            let result: MessageAnalysisResponse = try await post(endpoint: "/api/v1/analyze-message", body: request)
+            return result
+        } catch {
+            throw error
+        }
     }
     
     // MARK: - Event Management
@@ -197,7 +202,15 @@ class AIBackendService {
             messageId: messageId
         )
         
-        return try await post(endpoint: "/api/v1/events/create", body: request)
+        print("🔍 AIBackendService: Sending createEvent request")
+        do {
+            let response: EventCreateResponse = try await post(endpoint: "/api/v1/events/create", body: request)
+            print("🔍 AIBackendService: Received createEvent response: success=\(response.success), eventId=\(response.eventId ?? "nil")")
+            return response
+        } catch {
+            print("🔍 AIBackendService: createEvent failed: \(error.localizedDescription)")
+            throw error
+        }
     }
     
     /// Search for similar events
@@ -262,7 +275,7 @@ class AIBackendService {
         }
         
         let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        // Note: Using CodingKeys for field mapping instead of convertFromSnakeCase
         
         return try decoder.decode(DecisionSearchResponse.self, from: data)
     }
@@ -311,7 +324,7 @@ class AIBackendService {
         }
         
         let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        // Note: Using CodingKeys for field mapping instead of convertFromSnakeCase
         
         return try decoder.decode(ReminderSearchResponse.self, from: data)
     }
@@ -340,7 +353,7 @@ class AIBackendService {
         }
         
         let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        // Note: Using CodingKeys for field mapping instead of convertFromSnakeCase
         
         return try decoder.decode(ReminderVectorResponse.self, from: data)
     }
@@ -380,6 +393,15 @@ struct MessageAnalysisRequest: Codable {
     let conversationId: String
     let timestamp: String?  // ISO 8601 timestamp for accurate date calculations
     let userCalendar: [String]? // Simplified - not used in MVP
+    
+    enum CodingKeys: String, CodingKey {
+        case messageId = "message_id"
+        case text
+        case userId = "user_id"
+        case conversationId = "conversation_id"
+        case timestamp
+        case userCalendar = "user_calendar"
+    }
 }
 
 /// Event create request
@@ -391,6 +413,16 @@ struct EventCreateRequest: Codable {
     let userId: String
     let conversationId: String
     let messageId: String
+    
+    enum CodingKeys: String, CodingKey {
+        case title
+        case date
+        case time
+        case location
+        case userId = "user_id"
+        case conversationId = "conversation_id"
+        case messageId = "message_id"
+    }
 }
 
 /// Event search request
@@ -398,6 +430,12 @@ struct EventSearchRequest: Codable {
     let userId: String
     let query: String
     let k: Int
+    
+    enum CodingKeys: String, CodingKey {
+        case userId = "user_id"
+        case query
+        case k
+    }
 }
 
 // MARK: - Analysis Response Models
@@ -409,9 +447,18 @@ struct MessageAnalysisResponse: Codable {
     let reminder: ReminderDetection
     let decision: DecisionDetection
     let rsvp: RSVPDetection
-    let invitation: InvitationDetection
     let priority: PriorityDetection
     let conflict: ConflictDetection
+    
+    enum CodingKeys: String, CodingKey {
+        case messageId = "message_id"
+        case calendar
+        case reminder
+        case decision
+        case rsvp
+        case priority
+        case conflict
+    }
 }
 
 /// Calendar event detection
@@ -421,6 +468,16 @@ struct CalendarDetection: Codable {
     let date: String?  // ISO 8601
     let time: String?  // HH:MM
     let location: String?
+    let isInvitation: Bool  // Whether this event contains invitation language
+    
+    enum CodingKeys: String, CodingKey {
+        case detected
+        case title
+        case date
+        case time
+        case location
+        case isInvitation = "is_invitation"
+    }
 }
 
 /// Reminder detection
@@ -428,6 +485,12 @@ struct ReminderDetection: Codable {
     let detected: Bool
     let title: String?
     let dueDate: String?  // ISO 8601
+    
+    enum CodingKeys: String, CodingKey {
+        case detected
+        case title
+        case dueDate = "due_date"
+    }
 }
 
 /// Decision detection
@@ -441,6 +504,12 @@ struct RSVPDetection: Codable {
     let detected: Bool
     let status: String?  // "accepted" or "declined"
     let eventReference: String?
+    
+    enum CodingKeys: String, CodingKey {
+        case detected
+        case status
+        case eventReference = "event_reference"
+    }
 }
 
 /// Invitation detection (Story 5.4)
@@ -462,6 +531,11 @@ struct PriorityDetection: Codable {
 struct ConflictDetection: Codable {
     let detected: Bool
     let conflictingEvents: [String]
+    
+    enum CodingKeys: String, CodingKey {
+        case detected
+        case conflictingEvents = "conflicting_events"
+    }
 }
 
 // MARK: - Event Response Models
@@ -473,6 +547,14 @@ struct EventCreateResponse: Codable {
     let suggestLink: Bool
     let similarEvent: SimilarEvent?
     let message: String
+    
+    enum CodingKeys: String, CodingKey {
+        case success
+        case eventId = "event_id"
+        case suggestLink = "suggest_link"
+        case similarEvent = "similar_event"
+        case message
+    }
 }
 
 /// Similar event info
@@ -481,6 +563,13 @@ struct SimilarEvent: Codable {
     let title: String?
     let date: String?
     let similarity: Double?
+    
+    enum CodingKeys: String, CodingKey {
+        case eventId = "event_id"
+        case title
+        case date
+        case similarity
+    }
 }
 
 /// Event search response

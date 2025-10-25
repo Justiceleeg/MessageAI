@@ -2,7 +2,7 @@
 
 ## Epic Overview
 
-**Status:** Not Started  
+**Status:** Near Complete (5.6 remaining)  
 **Priority:** High  
 **Timeline:** Oct 23-26, 2025 (4 days)  
 **Dependencies:** Requires Epic 4 completion (Post-MVP UX)
@@ -74,6 +74,35 @@ This epic introduces AI-powered capabilities to MessageAI using a Python backend
    - API keys stored in gitignored config files
    - No sensitive data in logs
    - Proper error messages (no stack traces to client)
+
+## Recent Architecture Updates
+
+**Date:** October 25, 2025  
+**Impact:** Stories 5.1-5.5 implementation
+
+### Key Changes Made During Epic 5 Implementation:
+
+1. **Function Calling Implementation**
+   - Moved from direct JSON generation to OpenAI function calling
+   - More reliable, type-safe responses from AI
+   - See `ai-features-technical-spec.md` lines 958-1054
+
+2. **Performance Optimization**
+   - Model change: `gpt-4o-mini` → `gpt-3.5-turbo`
+   - Response time: 22+ seconds → ~3 seconds
+
+3. **API Response Format Updates**
+   - Added `is_invitation` field to calendar detection
+   - Added `event_reference` to RSVP responses
+   - Proper snake_case/camelCase mapping with CodingKeys
+
+4. **UI Consolidation**
+   - Single menu with three dots (Calendar, Decisions, Reminders)
+   - Unified event creation flow using `EventInvitationModal`
+
+**Note:** All pending stories (5.6) have been updated to reflect current API format and architecture patterns.
+
+---
 
 ## Stories
 
@@ -201,7 +230,7 @@ AI classifies message urgency automatically:
 ### Story 5.4: RSVP Tracking
 **Effort:** 0.75 days  
 **Value:** High - Social coordination  
-**Status:** Not Started
+**Status:** ✅ Done
 
 AI detects invitations and RSVPs for event management:
 - Detect "create event and invite" intent
@@ -218,7 +247,7 @@ AI detects invitations and RSVPs for event management:
 ### Story 5.5: Deadline/Reminder Extraction
 **Effort:** 0.5 days  
 **Value:** High - Practical utility  
-**Status:** Not Started
+**Status:** ✅ Done
 
 AI extracts commitments and schedules reminders:
 - Detect commitment language in messages

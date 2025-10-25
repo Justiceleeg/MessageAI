@@ -31,6 +31,14 @@ final class ChatViewModel: ObservableObject {
     @Published var aiSuggestions: [String: MessageAnalysisResponse] = [:] // messageId -> analysis
     @Published var dismissedAISuggestions: Set<String> = [] // messageIds where user acted on suggestion
     
+    // Message status cache to avoid repeated computation
+    private var messageStatusCache: [String: String] = [:] // messageId -> status
+    
+    /// Clear message status cache when messages change
+    private func clearMessageStatusCache() {
+        messageStatusCache.removeAll()
+    }
+    
     // Presence tracking (Story 3.3)
     @Published var participantPresence: [String: Bool] = [:]  // userId -> isOnline
     @Published var participantLastSeen: [String: Date] = [:]  // userId -> lastSeen Date
@@ -270,7 +278,7 @@ final class ChatViewModel: ObservableObject {
     /// Merge Firestore messages with local optimistic messages
     /// This prevents the listener from overwriting optimistic messages before Firestore confirms them
     private func mergeMessages(firestoreMessages: [Message]) {
-        logger.info("🔄 MERGE MESSAGES CALLED with \(firestoreMessages.count) messages from Firestore")
+        // logger.info("🔄 MERGE MESSAGES CALLED with \(firestoreMessages.count) messages from Firestore")
         // Start with Firestore messages (source of truth)
         var mergedMessages = firestoreMessages
         
@@ -414,6 +422,7 @@ final class ChatViewModel: ObservableObject {
         
         // Add message to UI immediately (optimistic update)
         messages.append(optimisticMessage)
+        clearMessageStatusCache() // Clear cache when messages change
         logger.info("Added optimistic message to UI: \(messageId)")
         
         // Save optimistic message to cache immediately
@@ -951,7 +960,13 @@ final class ChatViewModel: ObservableObject {
             return ""  // Received messages don't show status
         }
         
-        logger.debug("Computing status for message \(message.messageId): rawStatus=\(message.status), readBy=\(message.readBy)")
+        // Check cache first to avoid repeated computation
+        let cacheKey = "\(message.messageId)-\(message.status)-\(message.readBy.joined(separator: ","))"
+        if let cachedStatus = messageStatusCache[cacheKey] {
+            return cachedStatus
+        }
+        
+        // logger.debug("Computing status for message \(message.messageId): rawStatus=\(message.status), readBy=\(message.readBy)")
         
         // Return status directly for sending/sent/delivered
         if message.status == "sending" {
@@ -976,7 +991,7 @@ final class ChatViewModel: ObservableObject {
             // Get other participants (exclude current user)
             let otherParticipants = conversation.participants.filter { $0 != currentUserId }
             
-            logger.debug("Message \(message.messageId): otherParticipants=\(otherParticipants), readBy=\(message.readBy)")
+            // logger.debug("Message \(message.messageId): otherParticipants=\(otherParticipants), readBy=\(message.readBy)")
             
             // No other participants? Just return status
             guard !otherParticipants.isEmpty else {
@@ -987,13 +1002,18 @@ final class ChatViewModel: ObservableObject {
             // We'll show the count badge, so just check if at least one person read it
             let anyRead = otherParticipants.contains(where: { message.readBy.contains($0) })
             
-            logger.debug("Message \(message.messageId): anyRead=\(anyRead), readCount=\(message.readBy.filter { $0 != currentUserId }.count)")
+            // logger.debug("Message \(message.messageId): anyRead=\(anyRead), readCount=\(message.readBy.filter { $0 != currentUserId }.count)")
             
             // Return "read" if any participant has read, otherwise return delivered
             return anyRead ? "read" : "delivered"
         }
         
-        return message.status
+        let finalStatus = message.status
+        
+        // Cache the result to avoid repeated computation
+        messageStatusCache[cacheKey] = finalStatus
+        
+        return finalStatus
     }
     
     /// Calculate read count for a message (Story 4.1)
@@ -1012,7 +1032,7 @@ final class ChatViewModel: ObservableObject {
         let readByOthers = message.readBy.filter { $0 != currentUserId }
         let count = readByOthers.count
         
-        logger.debug("Read count for message \(message.messageId): \(count) (readBy: \(message.readBy))")
+        // logger.debug("Read count for message \(message.messageId): \(count) (readBy: \(message.readBy))")
         
         return count
     }
@@ -1059,10 +1079,10 @@ final class ChatViewModel: ObservableObject {
             $0.senderId != currentUserId && $0.status == "sent"
         }
         
-        logger.info("Found \(undeliveredMessages.count) undelivered messages (total messages: \(self.messages.count))")
+        // logger.info("Found \(undeliveredMessages.count) undelivered messages (total messages: \(self.messages.count))")
         
         guard !undeliveredMessages.isEmpty else {
-            logger.debug("No undelivered messages to mark")
+            // logger.debug("No undelivered messages to mark")
             return
         }
         
@@ -1171,7 +1191,7 @@ final class ChatViewModel: ObservableObject {
             return
         }
         
-        logger.info("📖 Marking all visible messages as read (total: \(self.messages.count))")
+        // logger.info("📖 Marking all visible messages as read (total: \(self.messages.count))")
         
         var markedCount = 0
         var skippedOwnMessages = 0
@@ -1200,7 +1220,7 @@ final class ChatViewModel: ObservableObject {
             }
         }
         
-        logger.info("📖 Results: marked=\(markedCount), skipped_own=\(skippedOwnMessages), skipped_already_read=\(skippedAlreadyRead), skipped_sending=\(skippedSending), total=\(self.messages.count)")
+        // logger.info("📖 Results: marked=\(markedCount), skipped_own=\(skippedOwnMessages), skipped_already_read=\(skippedAlreadyRead), skipped_sending=\(skippedSending), total=\(self.messages.count)")
     }
     
     /// Load conversation data for read receipt computation
@@ -1380,6 +1400,7 @@ final class ChatViewModel: ObservableObject {
     func analyzeMessageForAI(_ message: Message) {
         guard let currentUser = authService.currentUser else { return }
         guard let conversationId = conversationId else { return }
+        
         
         // Run analysis in background task
         Task {

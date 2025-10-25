@@ -4,7 +4,7 @@ Handles comprehensive message analysis including event detection, reminders, dec
 """
 from fastapi import APIRouter, HTTPException
 from app.models.requests import MessageAnalysisRequest
-from app.models.responses import MessageAnalysisResponse, CalendarDetection, ReminderDetection, DecisionDetection, RSVPDetection, InvitationDetection, PriorityDetection, ConflictDetection
+from app.models.responses import MessageAnalysisResponse, CalendarDetection, ReminderDetection, DecisionDetection, RSVPDetection, PriorityDetection, ConflictDetection
 from app.services.openai_service import get_openai_service
 from app.services.vector_store import get_vector_store
 
@@ -37,9 +37,12 @@ async def analyze_message(request: MessageAnalysisRequest):
             print(f"⚠️ Failed to retrieve context: {e}")
             # Continue without context - analysis will still work
         
-        # Step 2: Analyze message with GPT-4o-mini (with context if available)
+        # Step 2: Pre-process text to expand time acronyms
+        expanded_text = openai_service._expand_time_acronyms(request.text)
+        
+        # Step 3: Analyze message with GPT-4o-mini (with context if available)
         analysis = openai_service.analyze_message_comprehensive(
-            text=request.text,
+            text=expanded_text,  # Use expanded text for better AI understanding
             message_timestamp=request.timestamp,  # Pass message timestamp for date calculations
             user_calendar=request.user_calendar,
             conversation_context=conversation_context  # RAG context
@@ -64,14 +67,15 @@ async def analyze_message(request: MessageAnalysisRequest):
         )
         
         # Build response
-        return MessageAnalysisResponse(
+        response = MessageAnalysisResponse(
             message_id=request.message_id,
             calendar=CalendarDetection(
                 detected=analysis["calendar"]["detected"],
                 title=analysis["calendar"]["title"],
                 date=analysis["calendar"].get("date"),  # Use the parsed date
                 time=analysis["calendar"]["time"],
-                location=analysis["calendar"]["location"]
+                location=analysis["calendar"]["location"],
+                is_invitation=analysis["calendar"].get("is_invitation", False)
             ),
             reminder=ReminderDetection(
                 detected=analysis["reminder"]["detected"],
@@ -87,12 +91,6 @@ async def analyze_message(request: MessageAnalysisRequest):
                 status=analysis["rsvp"]["status"],
                 event_reference=analysis["rsvp"]["event_reference"]
             ),
-            invitation=InvitationDetection(
-                detected=analysis["invitation"]["detected"],
-                type=analysis["invitation"]["type"],
-                eventTitle=analysis["invitation"]["eventTitle"],
-                invitationDetected=analysis["invitation"]["invitationDetected"]
-            ),
             priority=PriorityDetection(
                 detected=analysis["priority"]["detected"],
                 level=analysis["priority"]["level"],
@@ -103,6 +101,10 @@ async def analyze_message(request: MessageAnalysisRequest):
                 conflicting_events=analysis["conflict"]["conflicting_events"]
             )
         )
+        
+        
+        
+        return response
         
     except Exception as e:
         print(f"Error analyzing message: {e}")

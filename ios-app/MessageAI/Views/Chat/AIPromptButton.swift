@@ -82,14 +82,21 @@ struct AIPromptContainerCompact: View {
     
     var body: some View {
         HStack(spacing: 6) {
-            // Priority 1: Invitation (Story 5.4)
-            if analysis.invitation.detected {
+            // Priority 1: Invitation (Story 5.4) - now unified with calendar detection
+            if analysis.calendar.detected && analysis.calendar.isInvitation {
                 AIPromptButtonCompact(
                     icon: "party.popper.fill",
                     text: "Create event & invite",
                     tintColor: .purple
                 ) {
-                    onCreateInvitation(analysis.invitation)
+                    // Create a mock InvitationDetection for backward compatibility
+                    let mockInvitation = InvitationDetection(
+                        detected: true,
+                        type: "create",
+                        eventTitle: analysis.calendar.title,
+                        invitationDetected: true
+                    )
+                    onCreateInvitation(mockInvitation)
                 }
             }
             // Priority 2: Calendar event (Story 5.1) - only if no invitation
@@ -178,14 +185,21 @@ struct AIPromptContainer: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Priority 1: Invitation (Story 5.4)
-            if analysis.invitation.detected {
+            // Priority 1: Invitation (Story 5.4) - now unified with calendar detection
+            if analysis.calendar.detected && analysis.calendar.isInvitation {
                 AIPromptButton(
                     icon: "party.popper.fill",
                     text: "🎉 Create event & invite?",
                     tintColor: .purple
                 ) {
-                    onCreateInvitation(analysis.invitation)
+                    // Create a mock InvitationDetection for backward compatibility
+                    let mockInvitation = InvitationDetection(
+                        detected: true,
+                        type: "create",
+                        eventTitle: analysis.calendar.title,
+                        invitationDetected: true
+                    )
+                    onCreateInvitation(mockInvitation)
                 }
             }
             // Priority 2: Calendar event (Story 5.1) - only if no invitation

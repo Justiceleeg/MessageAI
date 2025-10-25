@@ -17,7 +17,7 @@ class OpenAIService:
         """Initialize OpenAI client"""
         self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         self.embedding_model = "text-embedding-3-small"
-        self.chat_model = "gpt-4o-mini"
+        self.chat_model = "gpt-3.5-turbo"
         
         print(f"✅ OpenAIService initialized with model: {self.chat_model}")
     
@@ -42,8 +42,10 @@ class OpenAIService:
         messages: List[Dict[str, str]],
         system_prompt: Optional[str] = None,
         temperature: float = 0.7,
-        max_tokens: Optional[int] = None
-    ) -> str:
+        max_tokens: Optional[int] = None,
+        functions: Optional[List[Dict]] = None,
+        function_call: Optional[Dict] = None
+    ) -> Dict[str, Any]:
         """
         Generate chat completion using GPT model
         
@@ -52,22 +54,45 @@ class OpenAIService:
             system_prompt: Optional system prompt to prepend
             temperature: Sampling temperature (0-2)
             max_tokens: Maximum tokens to generate
+            functions: Optional list of function definitions for function calling
+            function_call: Optional function call specification
         
         Returns:
-            Generated response text
+            Generated response (text or function call result)
         """
         # Prepend system prompt if provided
         if system_prompt:
             messages = [{"role": "system", "content": system_prompt}] + messages
         
-        response = self.client.chat.completions.create(
-            model=self.chat_model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens
-        )
+        # Prepare request parameters
+        request_params = {
+            "model": self.chat_model,
+            "messages": messages
+        }
         
-        return response.choices[0].message.content
+        # Add temperature only if the model supports it (not gpt-5-nano)
+        if self.chat_model != "gpt-5-nano":
+            request_params["temperature"] = temperature
+        
+        # Add optional parameters
+        if max_tokens:
+            request_params["max_tokens"] = max_tokens
+        if functions:
+            request_params["functions"] = functions
+        if function_call:
+            request_params["function_call"] = function_call
+        
+        response = self.client.chat.completions.create(**request_params)
+        
+        message = response.choices[0].message
+        
+        # Return structured response
+        result = {
+            "content": message.content,
+            "function_call": message.function_call
+        }
+        
+        return result
     
     def analyze_sentiment(self, text: str) -> Dict[str, Any]:
         """
@@ -208,8 +233,8 @@ Respond with ONLY a JSON array like: ["point1", "point2", "point3"]"""
         system_prompt = f"""You are an AI assistant that analyzes messages for important information.
 
 IMPORTANT DISTINCTIONS:
-- **Events** are social gatherings with BOTH specific date AND time, involving multiple people. Example: "Dinner Friday at 7pm"
-- **Reminders** are personal tasks with deadlines but NO specific time. Example: "Send docs by Friday"  
+- **Events** are scheduled activities involving other people or social gatherings. Examples: "Dinner Friday at 7pm", "Meeting tomorrow at 2pm", "Party at my place Saturday"
+- **Reminders** are personal tasks or commitments (even with specific times). Examples: "I'll finish the presentation by noon tomorrow", "Send docs by Friday", "Call mom at 3pm", "Submit report by EOD"
 - **Decisions** are group agreements with NO time constraints. Example: "Let's go to Italian restaurant"
 
 {context_section if context_section else f'Analyze this message: "{text}"'}{calendar_context}
@@ -225,164 +250,343 @@ Examples:
 - "Coffee in 3 days at 2pm" → extract: date_expression="3 days from now", time="14:00"
 - "Meeting next Monday morning" → extract: date_expression="next Monday", time="09:00"
 
+COMMON TIME ACRONYMS (already expanded in input):
+- EOD/end of day → 11:59 PM
+- EOB/end of business → 5:00 PM
+- ASAP/as soon as possible → 1 hour from now
+- EOW/end of week → Friday 5:00 PM
+
+TEMPORAL CONTEXT EXTRACTION:
+- **Decisions**: Look for when decisions were made ("yesterday we decided", "earlier today")
+- **RSVP**: Look for response timing ("I can't make tomorrow's meeting", "I'm in for Friday")
+- **Priority**: Look for urgency deadlines ("need by EOD", "urgent, due tomorrow")
+- **Conflicts**: Look for when conflicts occur ("conflicts with my 3pm meeting")
+
 DO NOT calculate actual dates - just extract the expression and time!
 
-Detect ALL of the following (return JSON):
-1. **calendar**: Detect calendar events (date + time + multiple people)
-   - detected: true/false
-   - title: brief event name (null if not detected)
-   - date_expression: temporal expression as-is from message (e.g., "tomorrow", "this Saturday", "3 days from now")
-   - time: HH:MM 24-hour format (null if no specific time)
-   - location: place name (null if not mentioned)
+Analyze the message and use the analyze_message function to return structured results."""
 
-2. **reminder**: Detect reminders (tasks with deadlines, NO specific time)
-   - detected: true/false
-   - title: task description (null if not detected)
-   - date_expression: temporal expression for due date (e.g., "Friday", "next week")
-
-3. **decision**: Detect decisions/agreements (Story 5.2 - Context-Aware Detection)
-   - detected: true/false
-   - text: COMPLETE decision statement using conversation context if provided (null if not detected)
-   - CRITICAL: Agreement phrases like "sounds good", "yeah", "okay", "let's do it", "I'm in" ARE decisions when context is provided
-   - ALWAYS use conversation context to create a complete, clear decision statement
-   - Examples:
-     * "Yeah, sounds good" + context "Italian restaurant on Main St" → detected=true, text="Going to Italian restaurant on Main Street"
-     * "Okay" + context "meeting at 3pm Friday" → detected=true, text="Meeting at 3pm on Friday"
-     * "Let's do it" + context "Luigi's for dinner" → detected=true, text="Going to Luigi's for dinner"
-     * "I'm in" + context "coffee at Starbucks" → detected=true, text="Meeting at Starbucks for coffee"
-
-4. **rsvp**: Detect RSVP responses
-   - detected: true/false
-   - status: "accepted" or "declined" (null if not detected)
-   - event_reference: what event they're responding to (null if not clear)
-
-5. **invitation**: Detect event invitations (Story 5.4)
-   - detected: true/false
-   - type: "create" (invitation being sent)
-   - eventTitle: brief event title (null if not detected)
-   - invitationDetected: true/false
-   - CRITICAL: Look for invitation language like "party at my place", "come to", "join us for", "you're invited", "everyone's welcome"
-   - Must distinguish from personal events (no invitation language)
-
-6. **priority**: Detect urgency/priority (Story 5.3)
-   - detected: true/false
-   - level: "low", "medium", or "high" (null if not detected)
-   - reason: brief explanation of why this priority was assigned
-   - HIGH priority indicators: "URGENT", "ASAP", "emergency", "critical", deadlines within hours, "waiting on you", "blocking"
-   - MEDIUM priority indicators: "important", "need", "can you", direct questions requiring response, "FYI" with action item
-   - LOW priority: normal conversation, no urgency indicators
-
-7. **conflict**: Detect schedule conflicts (check against user_calendar)
-   - detected: true/false
-   - conflicting_events: [] (list of event titles that conflict)
-
-Return ONLY valid JSON in this exact structure:
-{{
-  "calendar": {{"detected": false, "title": null, "date_expression": null, "time": null, "location": null}},
-  "reminder": {{"detected": false, "title": null, "date_expression": null}},
-  "decision": {{"detected": false, "text": null}},
-  "rsvp": {{"detected": false, "status": null, "event_reference": null}},
-  "invitation": {{"detected": false, "type": null, "eventTitle": null, "invitationDetected": false}},
-  "priority": {{"detected": false, "level": null, "reason": null}},
-  "conflict": {{"detected": false, "conflicting_events": []}}
-}}"""
+        # Define the function schema for structured output
+        functions = [
+            {
+                "name": "analyze_message",
+                "description": "Analyze a message for events, reminders, decisions, RSVP, priority, and conflicts",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "calendar": {
+                            "type": "object",
+                            "description": "Calendar event detection",
+                            "properties": {
+                                "detected": {"type": "boolean", "description": "Whether a calendar event was detected"},
+                                "title": {"type": "string", "description": "Event title", "nullable": True},
+                                "date_expression": {"type": "string", "description": "Temporal expression as-is from message", "nullable": True},
+                                "time": {"type": "string", "description": "Time in HH:MM format", "nullable": True},
+                                "location": {"type": "string", "description": "Event location", "nullable": True},
+                                "is_invitation": {"type": "boolean", "description": "Whether contains invitation language"}
+                            },
+                            "required": ["detected", "is_invitation"]
+                        },
+                        "reminder": {
+                            "type": "object",
+                            "description": "Reminder detection",
+                            "properties": {
+                                "detected": {"type": "boolean", "description": "Whether a reminder was detected"},
+                                "title": {"type": "string", "description": "Reminder title", "nullable": True},
+                                "date_expression": {"type": "string", "description": "Due date expression", "nullable": True}
+                            },
+                            "required": ["detected"]
+                        },
+                        "decision": {
+                            "type": "object",
+                            "description": "Decision detection",
+                            "properties": {
+                                "detected": {"type": "boolean", "description": "Whether a decision was detected"},
+                                "text": {"type": "string", "description": "Complete decision statement", "nullable": True},
+                                "temporal_context": {"type": "string", "description": "When the decision was made (e.g., 'yesterday', 'earlier today')", "nullable": True}
+                            },
+                            "required": ["detected"]
+                        },
+                        "rsvp": {
+                            "type": "object",
+                            "description": "RSVP detection",
+                            "properties": {
+                                "detected": {"type": "boolean", "description": "Whether an RSVP was detected"},
+                                "status": {"type": "string", "description": "RSVP status (accepted/declined)", "nullable": True},
+                                "event_reference": {"type": "string", "description": "Referenced event", "nullable": True},
+                                "temporal_context": {"type": "string", "description": "When the RSVP was given (e.g., 'yesterday', 'just now')", "nullable": True}
+                            },
+                            "required": ["detected"]
+                        },
+                        "priority": {
+                            "type": "object",
+                            "description": "Priority detection",
+                            "properties": {
+                                "detected": {"type": "boolean", "description": "Whether priority was detected"},
+                                "level": {"type": "string", "description": "Priority level (low/medium/high)", "nullable": True},
+                                "reason": {"type": "string", "description": "Priority reason", "nullable": True},
+                                "deadline_expression": {"type": "string", "description": "When the urgent task is due (e.g., 'by EOD', 'tomorrow')", "nullable": True}
+                            },
+                            "required": ["detected"]
+                        },
+                        "conflict": {
+                            "type": "object",
+                            "description": "Conflict detection",
+                            "properties": {
+                                "detected": {"type": "boolean", "description": "Whether conflicts were detected"},
+                                "conflicting_events": {"type": "array", "items": {"type": "string"}, "description": "List of conflicting event titles"}
+                            },
+                            "required": ["detected", "conflicting_events"]
+                        }
+                    },
+                    "required": ["calendar", "reminder", "decision", "rsvp", "priority", "conflict"]
+                }
+            }
+        ]
         
         messages = [{"role": "user", "content": text}]
         
         response = self.chat_completion(
             messages=messages,
             system_prompt=system_prompt,
-            temperature=0.2  # Low temperature for consistent structured output
+            temperature=0.2,  # Low temperature for consistent structured output
+            functions=functions,
+            function_call={"name": "analyze_message"}  # Force function call
         )
         
-        # Parse JSON response
+        # Parse function call response
         try:
-            result = json.loads(response)
-            # Ensure all required fields are present with defaults
-            defaults = {
-                "calendar": {"detected": False, "title": None, "date_expression": None, "time": None, "location": None},
-                "reminder": {"detected": False, "title": None, "date_expression": None},
-                "decision": {"detected": False, "text": None},
-                "rsvp": {"detected": False, "status": None, "event_reference": None},
-                "invitation": {"detected": False, "type": None, "eventTitle": None, "invitationDetected": False},
-                "priority": {"detected": False, "level": None, "reason": None},
-                "conflict": {"detected": False, "conflicting_events": []}
-            }
-            # Merge defaults with result
-            for key in defaults:
-                if key not in result:
-                    result[key] = defaults[key]
-                else:
-                    for subkey in defaults[key]:
-                        if subkey not in result[key]:
-                            result[key][subkey] = defaults[key][subkey]
-            
-            # POST-PROCESS: Parse date expressions using dateparser
-            result = self._parse_date_expressions(result, reference_time)
-            
-            return result
-        except json.JSONDecodeError as e:
-            print(f"Failed to parse GPT response: {e}")
+            function_call = response.get("function_call")
+            if function_call and function_call.name == "analyze_message":
+                result = json.loads(function_call.arguments)
+                
+                # Ensure all required fields are present with defaults
+                result = self._ensure_complete_analysis(result)
+                
+                # POST-PROCESS: Parse date expressions using dateparser
+                result = self._parse_date_expressions(result, reference_time)
+                
+                return result
+            else:
+                print(f"Unexpected response format: {response}")
+                return self._get_default_analysis()
+        except (json.JSONDecodeError, KeyError, AttributeError) as e:
+            print(f"Failed to parse function call response: {e}")
             print(f"Response was: {response}")
-            # Return empty detections on error
-            return {
-                "calendar": {"detected": False, "title": None, "date_expression": None, "time": None, "location": None},
-                "reminder": {"detected": False, "title": None, "date_expression": None},
-                "decision": {"detected": False, "text": None},
-                "rsvp": {"detected": False, "status": None, "event_reference": None},
-                "invitation": {"detected": False, "type": None, "eventTitle": None, "invitationDetected": False},
-                "priority": {"detected": False, "level": None, "reason": None},
-                "conflict": {"detected": False, "conflicting_events": []}
+            return self._get_default_analysis()
+
+    def _get_default_analysis(self) -> Dict[str, Any]:
+        """Return default empty analysis structure"""
+        return {
+            "calendar": {"detected": False, "title": None, "date_expression": None, "time": None, "location": None, "is_invitation": False},
+            "reminder": {"detected": False, "title": None, "date_expression": None},
+            "decision": {"detected": False, "text": None},
+            "rsvp": {"detected": False, "status": None, "event_reference": None},
+            "priority": {"detected": False, "level": None, "reason": None},
+            "conflict": {"detected": False, "conflicting_events": []}
+        }
+
+    def _ensure_complete_analysis(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """Ensure all required fields are present in the analysis result"""
+        # Define complete field structure
+        complete_structure = {
+            "calendar": {
+                "detected": False, "title": None, "date_expression": None, 
+                "time": None, "location": None, "is_invitation": False
+            },
+            "reminder": {
+                "detected": False, "title": None, "date_expression": None
+            },
+            "decision": {
+                "detected": False, "text": None, "temporal_context": None
+            },
+            "rsvp": {
+                "detected": False, "status": None, "event_reference": None, "temporal_context": None
+            },
+            "priority": {
+                "detected": False, "level": None, "reason": None, "deadline_expression": None
+            },
+            "conflict": {
+                "detected": False, "conflicting_events": []
             }
+        }
+        
+        # Merge result with complete structure, ensuring all fields exist
+        for category, fields in complete_structure.items():
+            if category not in result:
+                result[category] = fields.copy()
+            else:
+                for field, default_value in fields.items():
+                    if field not in result[category]:
+                        result[category][field] = default_value
+        
+        return result
+
+    def _expand_time_acronyms(self, text: str) -> str:
+        """
+        Expand common time-related acronyms to full phrases for better AI understanding
+        
+        Args:
+            text: Input text that may contain time acronyms
+            
+        Returns:
+            Text with acronyms expanded to full phrases
+        """
+        # Dictionary of acronyms and their expansions
+        acronym_expansions = {
+            # Business time acronyms
+            'EOD': 'end of day',
+            'EOB': 'end of business',
+            'COB': 'close of business', 
+            'EOW': 'end of week',
+            'EOQ': 'end of quarter',
+            'EOY': 'end of year',
+            
+            # Urgency acronyms
+            'ASAP': 'as soon as possible',
+            'URGENT': 'urgent',
+            
+            # Time-specific expansions (case-insensitive)
+            'eod': 'end of day',
+            'eob': 'end of business',
+            'cob': 'close of business',
+            'eow': 'end of week',
+            'asap': 'as soon as possible',
+        }
+        
+        # Apply expansions (case-insensitive)
+        expanded_text = text
+        for acronym, expansion in acronym_expansions.items():
+            # Use word boundaries to avoid partial matches
+            import re
+            pattern = r'\b' + re.escape(acronym) + r'\b'
+            expanded_text = re.sub(pattern, expansion, expanded_text, flags=re.IGNORECASE)
+        
+        return expanded_text
 
     def _parse_date_expressions(self, result: Dict[str, Any], reference_time) -> Dict[str, Any]:
         """
         Parse date expressions from AI response into actual ISO dates using dateparser
+        Enhanced to handle all detection types with temporal elements
         
         Args:
             result: The AI analysis result with date_expression fields
             reference_time: The reference datetime for relative date parsing
             
         Returns:
-            Updated result with 'date' and 'due_date' fields added
+            Updated result with parsed date fields for all relevant detection types
         """
         import dateparser
+        
+        # Common dateparser settings
+        dateparser_settings = {
+            'RELATIVE_BASE': reference_time,
+            'PREFER_DATES_FROM': 'future',  # Always interpret as future dates
+            'RETURN_AS_TIMEZONE_AWARE': False
+        }
         
         # Parse calendar date expression
         if result["calendar"]["detected"] and result["calendar"]["date_expression"]:
             date_expr = result["calendar"]["date_expression"]
-            parsed_date = dateparser.parse(
-                date_expr,
-                settings={
-                    'RELATIVE_BASE': reference_time,
-                    'PREFER_DATES_FROM': 'future',  # Always interpret as future dates
-                    'RETURN_AS_TIMEZONE_AWARE': False
-                }
-            )
-            if parsed_date:
-                result["calendar"]["date"] = parsed_date.strftime('%Y-%m-%d')
-            else:
-                result["calendar"]["date"] = None
+            parsed_date = dateparser.parse(date_expr, settings=dateparser_settings)
+            result["calendar"]["date"] = parsed_date.strftime('%Y-%m-%d') if parsed_date else None
         else:
             result["calendar"]["date"] = None
         
         # Parse reminder date expression
         if result["reminder"]["detected"] and result["reminder"]["date_expression"]:
             date_expr = result["reminder"]["date_expression"]
-            parsed_date = dateparser.parse(
-                date_expr,
-                settings={
-                    'RELATIVE_BASE': reference_time,
-                    'PREFER_DATES_FROM': 'future',
-                    'RETURN_AS_TIMEZONE_AWARE': False
-                }
-            )
-            if parsed_date:
-                result["reminder"]["due_date"] = parsed_date.strftime('%Y-%m-%d')
-            else:
-                result["reminder"]["due_date"] = None
+            parsed_date = dateparser.parse(date_expr, settings=dateparser_settings)
+            result["reminder"]["due_date"] = parsed_date.strftime('%Y-%m-%d') if parsed_date else None
         else:
             result["reminder"]["due_date"] = None
+        
+        # Parse decision timestamp (when the decision was made)
+        if result["decision"]["detected"] and result["decision"]["text"]:
+            # Use temporal_context if provided by AI, otherwise extract from decision text
+            temporal_context = result["decision"].get("temporal_context")
+            if temporal_context:
+                parsed_date = dateparser.parse(temporal_context, settings=dateparser_settings)
+                result["decision"]["timestamp"] = parsed_date.strftime('%Y-%m-%d %H:%M:%S') if parsed_date else reference_time.strftime('%Y-%m-%d %H:%M:%S')
+            else:
+                # Fallback: look for temporal indicators in decision text
+                decision_text = result["decision"]["text"]
+                temporal_indicators = ["yesterday", "today", "earlier", "just now", "recently", "earlier today"]
+                for indicator in temporal_indicators:
+                    if indicator in decision_text.lower():
+                        parsed_date = dateparser.parse(indicator, settings=dateparser_settings)
+                        if parsed_date:
+                            result["decision"]["timestamp"] = parsed_date.strftime('%Y-%m-%d %H:%M:%S')
+                            break
+                else:
+                    # Default to current time if no temporal context found
+                    result["decision"]["timestamp"] = reference_time.strftime('%Y-%m-%d %H:%M:%S')
+        else:
+            result["decision"]["timestamp"] = None
+        
+        # Parse RSVP timestamp (when the response was given)
+        if result["rsvp"]["detected"]:
+            # Use temporal_context if provided by AI
+            temporal_context = result["rsvp"].get("temporal_context")
+            if temporal_context:
+                parsed_date = dateparser.parse(temporal_context, settings=dateparser_settings)
+                result["rsvp"]["timestamp"] = parsed_date.strftime('%Y-%m-%d %H:%M:%S') if parsed_date else reference_time.strftime('%Y-%m-%d %H:%M:%S')
+            else:
+                # Fallback: check for temporal context in status
+                rsvp_text = result["rsvp"]["status"] or ""
+                if any(word in rsvp_text.lower() for word in ["yesterday", "earlier", "just now"]):
+                    parsed_date = dateparser.parse(rsvp_text, settings=dateparser_settings)
+                    result["rsvp"]["timestamp"] = parsed_date.strftime('%Y-%m-%d %H:%M:%S') if parsed_date else reference_time.strftime('%Y-%m-%d %H:%M:%S')
+                else:
+                    result["rsvp"]["timestamp"] = reference_time.strftime('%Y-%m-%d %H:%M:%S')
+        else:
+            result["rsvp"]["timestamp"] = None
+        
+        # Parse priority deadline (when the urgent task is due)
+        if result["priority"]["detected"] and result["priority"]["level"] in ["high", "medium"]:
+            # Use deadline_expression if provided by AI
+            deadline_expression = result["priority"].get("deadline_expression")
+            if deadline_expression:
+                parsed_date = dateparser.parse(deadline_expression, settings=dateparser_settings)
+                result["priority"]["deadline"] = parsed_date.strftime('%Y-%m-%d %H:%M:%S') if parsed_date else None
+            else:
+                # Fallback: look for deadline indicators in reason
+                priority_text = result["priority"]["reason"] or ""
+                deadline_indicators = ["by", "before", "until", "deadline", "due"]
+                for indicator in deadline_indicators:
+                    if indicator in priority_text.lower():
+                        # Try to extract and parse the deadline
+                        import re
+                        deadline_match = re.search(rf'{indicator}\s+([^,\.]+)', priority_text, re.IGNORECASE)
+                        if deadline_match:
+                            deadline_expr = deadline_match.group(1).strip()
+                            parsed_date = dateparser.parse(deadline_expr, settings=dateparser_settings)
+                            if parsed_date:
+                                result["priority"]["deadline"] = parsed_date.strftime('%Y-%m-%d %H:%M:%S')
+                                break
+                else:
+                    # Default deadline based on priority level
+                    if result["priority"]["level"] == "high":
+                        # High priority: 1 hour from now
+                        from datetime import timedelta
+                        deadline = reference_time + timedelta(hours=1)
+                        result["priority"]["deadline"] = deadline.strftime('%Y-%m-%d %H:%M:%S')
+                    elif result["priority"]["level"] == "medium":
+                        # Medium priority: end of day
+                        from datetime import datetime, time
+                        eod = datetime.combine(reference_time.date(), time(23, 59, 59))
+                        result["priority"]["deadline"] = eod.strftime('%Y-%m-%d %H:%M:%S')
+                    else:
+                        result["priority"]["deadline"] = None
+        else:
+            result["priority"]["deadline"] = None
+        
+        # Parse conflict timestamps (when conflicts occur)
+        if result["conflict"]["detected"] and result["conflict"]["conflicting_events"]:
+            # Conflicts are typically about future events, so use current time as reference
+            result["conflict"]["detected_at"] = reference_time.strftime('%Y-%m-%d %H:%M:%S')
+        else:
+            result["conflict"]["detected_at"] = None
         
         return result
 

@@ -33,6 +33,9 @@ struct ChatView: View {
     @Environment(NotificationManager.self) private var notificationManager
     @EnvironmentObject private var authViewModel: AuthViewModel
     
+    // Services
+    private let eventService = EventService()
+    
     // State for retry action sheet
     @State private var showRetryActionSheet = false
     @State private var selectedMessageForRetry: Message?
@@ -45,9 +48,8 @@ struct ChatView: View {
     @State private var showDecisionConfirmationModal = false
     @State private var selectedDecisionData: DecisionDetection?
     
-    // State for invitation features (Story 5.4)
+    // State for unified event creation (Story 5.1 & 5.4)
     @State private var showEventInvitationModal = false
-    @State private var selectedInvitationData: InvitationDetection?
     
     // State for reminder features (Story 5.5)
     @State private var showReminderCreationModal = false
@@ -140,40 +142,41 @@ struct ChatView: View {
                 }
             }
             
-            // Calendar button (Story 5.1.5)
+            // Chat menu button (consolidated from three separate buttons)
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button(action: {
-                    showCalendar = true
-                }) {
-                    Image(systemName: "calendar")
-                        .foregroundStyle(.blue)
+                Menu {
+                    // Calendar option
+                    Button(action: {
+                        showCalendar = true
+                    }) {
+                        Label("Calendar", systemImage: "calendar")
+                    }
+                    .accessibilityLabel("Calendar")
+                    .accessibilityHint("View events and reminders")
+                    
+                    // Decisions option
+                    Button(action: {
+                        showPerChatDecisions = true
+                    }) {
+                        Label("Chat Decisions", systemImage: "checkmark.circle")
+                    }
+                    .accessibilityLabel("Chat Decisions")
+                    .accessibilityHint("View decisions from this conversation")
+                    
+                    // Reminders option
+                    Button(action: {
+                        showPerChatReminders = true
+                    }) {
+                        Label("Chat Reminders", systemImage: "bell")
+                    }
+                    .accessibilityLabel("Chat Reminders")
+                    .accessibilityHint("View reminders from this conversation")
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .foregroundStyle(.primary)
                 }
-                .accessibilityLabel("Calendar")
-                .accessibilityHint("View events and reminders")
-            }
-            
-            // Per-Chat Decisions button (Story 5.2 AC5)
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button(action: {
-                    showPerChatDecisions = true
-                }) {
-                    Image(systemName: "checkmark.circle")
-                        .foregroundStyle(.green)
-                }
-                .accessibilityLabel("Chat Decisions")
-                .accessibilityHint("View decisions from this conversation")
-            }
-            
-            // Per-Chat Reminders button (Story 5.5 AC5)
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button(action: {
-                    showPerChatReminders = true
-                }) {
-                    Image(systemName: "bell")
-                        .foregroundStyle(.orange)
-                }
-                .accessibilityLabel("Chat Reminders")
-                .accessibilityHint("View reminders from this conversation")
+                .accessibilityLabel("Chat Menu")
+                .accessibilityHint("Open chat options menu")
             }
         }
         .onAppear {
@@ -230,8 +233,7 @@ struct ChatView: View {
             }
         }
         .sheet(isPresented: $showEventInvitationModal) {
-            if let invitationData = selectedInvitationData,
-               let messageId = selectedMessageId,
+            if let messageId = selectedMessageId,
                let conversationId = conversationId,
                let analysis = viewModel.aiSuggestions[messageId] {
                 EventInvitationModal(
@@ -239,14 +241,36 @@ struct ChatView: View {
                     messageId: messageId,
                     conversationId: conversationId
                 ) { event in
-                    // Event created with invitations successfully - dismiss AI prompt
+                    // Event created with invitations successfully - store in Firestore, link to chat, and dismiss AI prompt
+                    Task {
+                        do {
+                            // Store event in Firestore first
+                            _ = try await eventService.createEvent(event)
+                            print("Event created and stored: \(event.title)")
+                            
+                            // Link event to chat if there are invitations
+                            if !event.invitations.isEmpty {
+                                let invitation = event.invitations[conversationId]
+                                if let invitation = invitation {
+                                    try await eventService.linkEventToChat(
+                                        eventId: event.eventId,
+                                        conversationId: conversationId,
+                                        messageId: messageId,
+                                        invitedUserIds: invitation.invitedUserIds
+                                    )
+                                    print("Event linked to chat with \(invitation.invitedUserIds.count) participants")
+                                }
+                            }
+                        } catch {
+                            print("Failed to store or link event: \(error.localizedDescription)")
+                        }
+                    }
                     viewModel.dismissAISuggestion(for: messageId)
-                    print("Event created with invitations: \(event.title)")
                 }
             }
         }
         .sheet(isPresented: $showReminderCreationModal) {
-            if let reminderData = selectedReminderData,
+            if let _ = selectedReminderData,
                let messageId = selectedMessageId,
                let conversationId = conversationId,
                let analysis = viewModel.aiSuggestions[messageId] {
@@ -342,25 +366,17 @@ struct ChatView: View {
                                            let analysis = viewModel.aiSuggestions[message.messageId],
                                            !viewModel.dismissedAISuggestions.contains(message.messageId) {
                                             Group {
-                                                if analysis.invitation.detected {
-                                                    AIPromptButtonCompact(
-                                                        icon: "party.popper.fill",
-                                                        text: "Create event & invite",
-                                                        tintColor: .purple
-                                                    ) {
-                                                        selectedInvitationData = analysis.invitation
-                                                        selectedMessageId = message.messageId
-                                                        showEventInvitationModal = true
-                                                    }
-                                                } else if analysis.calendar.detected {
+                                                // Unified event creation - use single blue button for calendar detection
+                                                if analysis.calendar.detected {
                                                     AIPromptButtonCompact(
                                                         icon: "calendar.badge.plus",
                                                         text: "Add to calendar",
                                                         tintColor: .blue
                                                     ) {
+                                                        // Always use EventInvitationModal for unified flow
                                                         selectedEventData = analysis.calendar
                                                         selectedMessageId = message.messageId
-                                                        showEventCreationModal = true
+                                                        showEventInvitationModal = true
                                                     }
                                                 } else if analysis.reminder.detected {
                                                     AIPromptButtonCompact(
@@ -390,7 +406,7 @@ struct ChatView: View {
                                 .id(message.id)
                                 .onAppear {
                                     // Mark message as read when it appears (Story 3.2)
-                                    viewModel.markMessageAsReadIfVisible(messageId: message.id)
+                                    _ = viewModel.markMessageAsReadIfVisible(messageId: message.id)
                                 }
                             }
                         }

@@ -62,5 +62,12 @@ final class MessageEntity {
             readBy: readBy
         )
     }
+    
+    /// Computed property for display status - cached by SwiftData
+    /// This avoids repeated computation in SwiftUI views
+    /// Note: This is a simplified version - the full logic is in ChatViewModel
+    var displayStatus: String {
+        return status
+    }
 }
 

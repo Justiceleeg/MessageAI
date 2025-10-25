@@ -955,6 +955,104 @@ logger.error("OpenAI API failed", exc_info=True)
 
 ---
 
+## Recent Updates (January 2025)
+
+### AI Analysis System Improvements
+
+**Date:** January 27, 2025  
+**Changes:** Major refactoring of AI analysis system for improved reliability and performance
+
+#### Key Changes Made:
+
+1. **Function Calling Implementation**
+   - **Before:** Direct JSON generation from LLM (error-prone)
+   - **After:** OpenAI function calling with structured schema
+   - **Benefit:** More reliable, type-safe responses from AI
+
+2. **Unified Event Handling**
+   - **Before:** Two separate event creation flows (calendar vs invitation)
+   - **After:** Single unified flow using `EventInvitationModal`
+   - **Benefit:** Consistent UX, easier maintenance
+
+3. **Enhanced Date Parsing**
+   - **Added:** `dateparser` library integration for all detection types
+   - **Added:** Time acronym expansion (EOD, EOB, etc.)
+   - **Benefit:** Better AI understanding of temporal expressions
+
+4. **Performance Optimization**
+   - **Model Change:** `gpt-5-nano` → `gpt-3.5-turbo`
+   - **Response Time:** 22+ seconds → ~3 seconds
+   - **Benefit:** Much faster user experience
+
+5. **Field Mapping Fixes**
+   - **Issue:** iOS camelCase vs Backend snake_case mismatch
+   - **Solution:** Added `CodingKeys` to all iOS models
+   - **Benefit:** Reliable data parsing between frontend/backend
+
+6. **UI Consolidation**
+   - **Before:** Three separate toolbar icons (Calendar, Decisions, Reminders)
+   - **After:** Single menu with three horizontal dots
+   - **Benefit:** Cleaner interface, more scalable
+
+#### Technical Implementation Details:
+
+**Backend Changes:**
+- `openai_service.py`: Implemented function calling with structured schema
+- `analysis.py`: Enhanced with acronym expansion and date parsing
+- `responses.py`: Updated models with `is_invitation` field
+
+**iOS Changes:**
+- `AIBackendService.swift`: Added `CodingKeys` for all models
+- `ChatView.swift`: Unified event creation UI
+- `EventInvitationModal.swift`: Enhanced to handle both calendar and invitation flows
+- `ChatViewModel.swift`: Added message status caching
+
+**API Response Format:**
+```json
+{
+  "message_id": "string",
+  "calendar": {
+    "detected": boolean,
+    "title": "string|null",
+    "date": "string|null",
+    "time": "string|null", 
+    "location": "string|null",
+    "is_invitation": boolean
+  },
+  "reminder": {
+    "detected": boolean,
+    "title": "string|null",
+    "due_date": "string|null"
+  },
+  "decision": {
+    "detected": boolean,
+    "text": "string|null"
+  },
+  "rsvp": {
+    "detected": boolean,
+    "status": "string|null",
+    "event_reference": "string|null"
+  },
+  "priority": {
+    "detected": boolean,
+    "level": "string|null",
+    "reason": "string|null"
+  },
+  "conflict": {
+    "detected": boolean,
+    "conflicting_events": ["string"]
+  }
+}
+```
+
+#### Testing Results:
+- ✅ Reminder detection: "I'll finish the presentation by noon tomorrow"
+- ✅ Event detection: "Let's meet Friday at 3pm for coffee"
+- ✅ Response time: ~3 seconds (down from 22+ seconds)
+- ✅ UI prompts: Orange "Set reminder" and blue "Add to calendar" buttons working
+
+---
+
 ## References
 
 ### Documentation

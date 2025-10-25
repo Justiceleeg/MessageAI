@@ -268,7 +268,8 @@ struct EventCreationView: View {
             title: "Coffee meeting",
             date: "2025-10-27",
             time: "15:00",
-            location: "Starbucks"
+            location: "Starbucks",
+            isInvitation: false
         ),
         messageId: "msg_123",
         conversationId: "conv_456"

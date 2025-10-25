@@ -1,24 +1,15 @@
-//
-//  EventInvitationModal.swift
-//  MessageAI
-//
-//  Modal for creating events with invitations and RSVP tracking
-//  Story 5.4 - RSVP Tracking
-//
-
 import SwiftUI
-import FirebaseFirestore
 
-/// Modal view for creating events with invitations
+/// Modal for creating events with invitation capabilities
+/// Unified event creation flow that handles both calendar events and invitations
 struct EventInvitationModal: View {
-    @Environment(\.dismiss) private var dismiss
-    
-    // Pre-filled data from AI analysis
-    let analysis: MessageAnalysisResponse
+    let analysis: MessageAnalysisResponse?
+    let calendarData: CalendarDetection?
     let messageId: String
     let conversationId: String
+    let onEventCreated: (Event) -> Void
     
-    // Editable fields
+    // Form fields
     @State private var title: String
     @State private var date: Date
     @State private var hasTime: Bool
@@ -27,7 +18,6 @@ struct EventInvitationModal: View {
     
     // Invitation settings
     @State private var inviteAllParticipants: Bool = true
-    @State private var selectedParticipants: Set<String> = []
     
     // State
     @State private var isCreating = false
@@ -36,75 +26,54 @@ struct EventInvitationModal: View {
     @State private var suggestedEvent: SimilarEvent?
     
     // Services
+    private let aiBackendService = AIBackendService()
     private let eventService = EventService()
-    private let aiBackendService = AIBackendService.shared
-    private let firestoreService = FirestoreService()
     
-    // Callbacks
-    let onEventCreated: (Event) -> Void
+    // Environment
+    @Environment(\.dismiss) private var dismiss
     
-    // MARK: - Initialization
-    
-    init(
-        analysis: MessageAnalysisResponse,
-        messageId: String,
-        conversationId: String,
-        onEventCreated: @escaping (Event) -> Void
-    ) {
+    init(analysis: MessageAnalysisResponse? = nil, calendarData: CalendarDetection? = nil, messageId: String, conversationId: String, onEventCreated: @escaping (Event) -> Void) {
         self.analysis = analysis
+        self.calendarData = calendarData
         self.messageId = messageId
         self.conversationId = conversationId
         self.onEventCreated = onEventCreated
         
-        // Initialize state from AI data
-        _title = State(initialValue: analysis.invitation.eventTitle ?? "")
-        
-        // Parse date and time from AI analysis
-        let now = Date()
-        var parsedDate = now
-        var hasTime = false
-        var parsedTime = now
-        
-        // Parse date from calendar detection (backend already processed with dateparser)
-        if let dateString = analysis.calendar.date {
-            // Backend provides ISO date string, just parse it directly
-            if let parsed = ISO8601DateFormatter().date(from: dateString) {
-                parsedDate = parsed
-            }
+        // Initialize form fields with priority: calendarData > analysis > defaults
+        if let calendarData = calendarData {
+            self._title = State(initialValue: calendarData.title ?? "")
+            self._date = State(initialValue: Self.parseDate(from: calendarData.date) ?? Date())
+            self._hasTime = State(initialValue: calendarData.time != nil)
+            self._time = State(initialValue: Self.parseTime(from: calendarData.time) ?? Date())
+            self._location = State(initialValue: calendarData.location ?? "")
+        } else if let analysis = analysis {
+            self._title = State(initialValue: analysis.calendar.title ?? "")
+            self._date = State(initialValue: Self.parseDate(from: analysis.calendar.date) ?? Date())
+            self._hasTime = State(initialValue: analysis.calendar.time != nil)
+            self._time = State(initialValue: Self.parseTime(from: analysis.calendar.time) ?? Date())
+            self._location = State(initialValue: analysis.calendar.location ?? "")
+        } else {
+            self._title = State(initialValue: "")
+            self._date = State(initialValue: Date())
+            self._hasTime = State(initialValue: false)
+            self._time = State(initialValue: Date())
+            self._location = State(initialValue: "")
         }
-        
-        // Parse time from calendar detection (backend provides HH:MM format)
-        if let timeString = analysis.calendar.time {
-            hasTime = true
-            let formatter = DateFormatter()
-            formatter.dateFormat = "HH:mm"
-            if let parsed = formatter.date(from: timeString) {
-                parsedTime = parsed
-            }
-        }
-        
-        _date = State(initialValue: parsedDate)
-        _hasTime = State(initialValue: hasTime)
-        _time = State(initialValue: parsedTime)
-        _location = State(initialValue: analysis.calendar.location ?? "")
     }
-    
-    // MARK: - Body
     
     var body: some View {
         NavigationView {
             Form {
                 Section {
-                    TextField("Event Title", text: $title)
-                        .font(.system(size: 18, weight: .semibold))
+                    TextField("Event title", text: $title)
                 } header: {
-                    Text("Event Details")
+                    Text("What")
                 }
                 
                 Section {
                     DatePicker("Date", selection: $date, displayedComponents: .date)
                     
-                    Toggle("Specific Time", isOn: $hasTime)
+                    Toggle("Add time", isOn: $hasTime)
                     
                     if hasTime {
                         DatePicker("Time", selection: $time, displayedComponents: .hourAndMinute)
@@ -114,84 +83,71 @@ struct EventInvitationModal: View {
                 }
                 
                 Section {
-                    TextField("Location (Optional)", text: $location)
+                    TextField("Location (optional)", text: $location)
                 } header: {
                     Text("Where")
                 }
                 
                 Section {
-                    Toggle("Invite all chat participants", isOn: $inviteAllParticipants)
-                        .onChange(of: inviteAllParticipants) { _, newValue in
-                            if newValue {
-                                // Select all participants when toggling on
-                                Task {
-                                    let participants = await getConversationParticipants()
-                                    selectedParticipants = Set(participants)
-                                }
-                            } else {
-                                // Clear selection when toggling off
-                                selectedParticipants.removeAll()
-                            }
-                        }
+                        Toggle("Invite participants", isOn: $inviteAllParticipants)
                     
-                    if !inviteAllParticipants {
-                        ParticipantSelectionView(
-                            selectedParticipants: $selectedParticipants,
-                            conversationId: conversationId
-                        )
+                    if inviteAllParticipants {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("All chat participants will be automatically invited to this event.")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                            
+                            Text("They will receive a notification and can RSVP directly from the chat.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.vertical, 8)
                     }
                 } header: {
                     Text("Invitations")
                 } footer: {
-                    Text("All chat participants will be invited to this event and can RSVP.")
+                    if inviteAllParticipants {
+                        Text("All chat participants will be invited to this event and can RSVP.")
+                    } else {
+                        Text("Create a personal event without sending invitations.")
+                    }
                 }
                 
                 if let errorMessage = errorMessage {
                     Section {
                         Text(errorMessage)
                             .foregroundColor(.red)
-                            .font(.caption)
-                    }
-                }
-            }
-            .navigationTitle("Create Event & Invite")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        dismiss()
                     }
                 }
                 
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Create & Invite") {
+                if showLinkingSuggestion {
+                    Section {
+                        if let suggestedEvent = suggestedEvent {
+                            Text("Found similar event: '\(suggestedEvent.title ?? "")' on \(suggestedEvent.date ?? ""). Would you like to link to this existing event instead of creating a new one?")
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Create Event")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        // Dismiss modal
+                    }
+                }
+                
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(inviteAllParticipants ? "Create & Invite" : "Create Event") {
                         Task {
-                            await createEventWithInvitations()
+                            if showLinkingSuggestion {
+                                await linkToExistingEvent()
+                            } else {
+                                await createEventWithInvitations()
+                            }
                         }
                     }
                     .disabled(title.isEmpty || isCreating)
-                }
-            }
-            .disabled(isCreating)
-            .alert("Link to Existing Event?", isPresented: $showLinkingSuggestion) {
-                Button("Create New Event") {
-                    // Continue with new event creation
-                    Task {
-                        await createEventWithInvitations()
-                    }
-                }
-                Button("Link to Existing") {
-                    // Link to existing event
-                    Task {
-                        await linkToExistingEvent()
-                    }
-                }
-                Button("Cancel", role: .cancel) {
-                    dismiss()
-                }
-            } message: {
-                if let suggestedEvent = suggestedEvent {
-                    Text("Found similar event: '\(suggestedEvent.title ?? "")' on \(suggestedEvent.date ?? ""). Would you like to link to this existing event instead of creating a new one?")
                 }
             }
         }
@@ -219,6 +175,7 @@ struct EventInvitationModal: View {
             let timeString = hasTime ? formatTimeHHMM(time) : nil
             
             // Call backend to create event
+            print("🔍 Creating event: title=\(title), date=\(dateString), time=\(timeString ?? "nil"), location=\(location.isEmpty ? "nil" : location)")
             let response = try await aiBackendService.createEvent(
                 title: title,
                 date: dateString,
@@ -228,6 +185,7 @@ struct EventInvitationModal: View {
                 conversationId: conversationId,
                 messageId: messageId
             )
+            print("🔍 Backend response: success=\(response.success), eventId=\(response.eventId ?? "nil"), suggestLink=\(response.suggestLink)")
             
             // Check if backend suggests linking to existing event
             if response.suggestLink, let similarEvent = response.similarEvent {
@@ -240,102 +198,69 @@ struct EventInvitationModal: View {
                 return
             }
             
-            guard let eventId = response.eventId else {
-                throw NSError(domain: "EventInvitation", code: 500, userInfo: [NSLocalizedDescriptionKey: "No event ID returned"])
-            }
+            // Get conversation to determine participants
+            let conversation = try await FirestoreService().getConversation(conversationId: conversationId)
             
-            // Get conversation to find all participants
-            let conversation = try await firestoreService.getConversation(conversationId: conversationId)
-            
-            // Determine who to invite
+            // Determine participants to invite
             let participantsToInvite: [String]
             if inviteAllParticipants {
                 participantsToInvite = conversation.participants.filter { $0 != userId }
             } else {
-                participantsToInvite = Array(selectedParticipants).filter { $0 != userId }
+                participantsToInvite = []
             }
             
-            // Create attendees dictionary with invited participants
-            var attendees: [String: Attendee] = [:]
-            for participantId in participantsToInvite {
-                attendees[participantId] = Attendee(status: .pending)
+            // Create attendees dictionary with invited participants (only if inviting)
+            var attendees: [String: String] = [:]
+            if inviteAllParticipants && !participantsToInvite.isEmpty {
+                for participantId in participantsToInvite {
+                    attendees[participantId] = "pending"
+                }
             }
             
-            // Create invitations map
-            var invitations: [String: Invitation] = [:]
-            invitations[conversationId] = Invitation(
-                messageId: messageId,
-                invitedUserIds: participantsToInvite,
-                timestamp: Date()
-            )
+            // Create invitation if inviting participants
+            var invitation: Invitation? = nil
+            if inviteAllParticipants && !participantsToInvite.isEmpty {
+                invitation = Invitation(
+                    messageId: messageId,
+                    invitedUserIds: participantsToInvite
+                )
+            }
             
-            let newEvent = Event(
-                eventId: eventId,
-                title: title,
-                date: date,
-                time: timeString,
-                location: location.isEmpty ? nil : location,
-                creatorUserId: userId,
-                createdAt: Date(),
-                createdInConversationId: conversationId,
-                createdAtMessageId: messageId,
-                invitations: invitations,
-                attendees: attendees
-            )
+            // Note: Event linking will be handled by the parent view after event is stored in Firestore
             
-            // Save to Firestore
-            _ = try await eventService.createEvent(newEvent)
-            
-            // Update the original message with invitation metadata
-            try await updateMessageWithInvitationMetadata(eventId: eventId, messageId: messageId, conversationId: conversationId)
-            
-            // Notify parent and dismiss
-            await MainActor.run {
-                onEventCreated(newEvent)
-                dismiss()
+            // Create Event object for callback
+            if let eventId = response.eventId {
+                print("🔍 Creating Event object: eventId=\(eventId), attendees=\(attendees), invitation=\(invitation != nil)")
+                let event = Event(
+                    eventId: eventId,
+                    title: title,
+                    date: date,
+                    time: timeString,
+                    location: location.isEmpty ? nil : location,
+                    creatorUserId: userId,
+                    createdAt: Date(),
+                    createdInConversationId: conversationId,
+                    createdAtMessageId: messageId,
+                    invitations: invitation != nil ? [conversationId: invitation!] : [:],
+                    attendees: Dictionary(uniqueKeysWithValues: attendees.map { ($0.key, Attendee()) })
+                )
+                
+                await MainActor.run {
+                    onEventCreated(event)
+                    dismiss()
+                }
             }
             
         } catch {
             await MainActor.run {
-                errorMessage = "Failed to create event: \(error.localizedDescription)"
+                errorMessage = error.localizedDescription
                 isCreating = false
             }
         }
     }
     
-    private func getConversationParticipants() async -> [String] {
-        do {
-            let conversation = try await firestoreService.getConversation(conversationId: conversationId)
-            return conversation.participants
-        } catch {
-            print("Failed to get conversation participants: \(error)")
-            return []
-        }
-    }
-    
-    private func updateMessageWithInvitationMetadata(eventId: String, messageId: String, conversationId: String) async throws {
-        // Update the existing message in Firestore with invitation metadata
-        let db = Firestore.firestore()
-        let messageRef = db.collection("conversations").document(conversationId).collection("messages").document(messageId)
-        
-        let metadata = MessageMetadata(isInvitation: true, eventId: eventId)
-        let metadataData = try Firestore.Encoder().encode(metadata)
-        
-        print("🔧 DEBUG: Updating message \(messageId) with metadata: isInvitation=\(metadata.isInvitation ?? false), eventId=\(metadata.eventId ?? "nil")")
-        
-        try await messageRef.updateData([
-            "metadata": metadataData
-        ])
-        
-        print("✅ Message updated with invitation metadata: \(messageId)")
-    }
-    
     private func linkToExistingEvent() async {
-        guard let suggestedEvent = suggestedEvent,
-              let eventId = suggestedEvent.eventId else {
-            errorMessage = "Invalid event data"
-            return
-        }
+        guard let suggestedEvent = suggestedEvent else { return }
         
         isCreating = true
         errorMessage = nil
@@ -346,56 +271,51 @@ struct EventInvitationModal: View {
                 throw NSError(domain: "EventInvitation", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
             }
             
-            // Get conversation to find all participants
-            let conversation = try await firestoreService.getConversation(conversationId: conversationId)
+            // Get conversation to determine participants
+            let conversation = try await FirestoreService().getConversation(conversationId: conversationId)
             
-            // Determine who to invite
+            // Determine participants to invite
             let participantsToInvite: [String]
             if inviteAllParticipants {
                 participantsToInvite = conversation.participants.filter { $0 != userId }
             } else {
-                participantsToInvite = Array(selectedParticipants)
+                participantsToInvite = []
             }
             
-            // Create invitation for this conversation
-            let invitation = Invitation(
-                messageId: messageId,
-                invitedUserIds: participantsToInvite,
-                timestamp: Date()
+            // Create invitation if inviting participants
+            var invitation: Invitation? = nil
+            if inviteAllParticipants && !participantsToInvite.isEmpty {
+                invitation = Invitation(
+                    messageId: messageId,
+                    invitedUserIds: participantsToInvite
+                )
+            }
+            
+            // Note: Event linking will be handled by the parent view after event is stored in Firestore
+            
+            // Create Event object for callback
+            let event = Event(
+                eventId: suggestedEvent.eventId ?? "",
+                title: suggestedEvent.title ?? title,
+                date: Self.parseDate(from: suggestedEvent.date) ?? date,
+                time: hasTime ? formatTimeHHMM(time) : nil,
+                location: location.isEmpty ? nil : location,
+                creatorUserId: userId,
+                createdAt: Date(),
+                createdInConversationId: conversationId,
+                createdAtMessageId: messageId,
+                invitations: invitation != nil ? [conversationId: invitation!] : [:],
+                attendees: Dictionary(uniqueKeysWithValues: (invitation?.invitedUserIds ?? []).map { ($0, Attendee()) })
             )
             
-            // Link to existing event by adding invitation and attendees
-            try await eventService.linkEventToChat(
-                eventId: eventId,
-                conversationId: conversationId,
-                invitation: invitation,
-                attendees: participantsToInvite
-            )
-            
-            // Update the original message with invitation metadata
-            try await updateMessageWithInvitationMetadata(eventId: eventId, messageId: messageId, conversationId: conversationId)
-            
-            // Notify parent and dismiss
             await MainActor.run {
-                onEventCreated(Event(
-                    eventId: eventId,
-                    title: title,
-                    date: date,
-                    time: hasTime ? formatTimeHHMM(time) : nil,
-                    location: location.isEmpty ? nil : location,
-                    creatorUserId: userId,
-                    createdAt: Date(),
-                    createdInConversationId: conversationId,
-                    createdAtMessageId: messageId,
-                    invitations: [conversationId: invitation],
-                    attendees: [:]
-                ))
+                onEventCreated(event)
                 dismiss()
             }
             
         } catch {
             await MainActor.run {
-                errorMessage = "Failed to link event: \(error.localizedDescription)"
+                errorMessage = error.localizedDescription
                 isCreating = false
             }
         }
@@ -403,156 +323,41 @@ struct EventInvitationModal: View {
     
     // MARK: - Helper Functions
     
-    private func formatDateISO(_ date: Date) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate]
-        return formatter.string(from: date)
-    }
-    
-    private func formatTimeHHMM(_ time: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm"
-        return formatter.string(from: time)
-    }
-}
-
-// MARK: - Participant Selection View
-
-struct ParticipantSelectionView: View {
-    @Binding var selectedParticipants: Set<String>
-    let conversationId: String
-    
-    @State private var participants: [User] = []
-    @State private var isLoading = true
-    
-    var body: some View {
-        if isLoading {
-            HStack {
-                ProgressView()
-                    .scaleEffect(0.8)
-                Text("Loading participants...")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            .task {
-                await loadParticipants()
-            }
-        } else {
-            ForEach(participants, id: \.userId) { participant in
-                HStack {
-                    Text(participant.displayName)
-                    Spacer()
-                    if selectedParticipants.contains(participant.userId) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.blue)
-                    } else {
-                        Image(systemName: "circle")
-                            .foregroundColor(.gray)
-                    }
-                }
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    if selectedParticipants.contains(participant.userId) {
-                        selectedParticipants.remove(participant.userId)
-                    } else {
-                        selectedParticipants.insert(participant.userId)
-                    }
-                }
-            }
-        }
-    }
-    
-    private func loadParticipants() async {
+    private func getConversationParticipants() async -> [String] {
         do {
             let conversation = try await FirestoreService().getConversation(conversationId: conversationId)
-            let firestoreService = FirestoreService()
-            var loadedParticipants: [User] = []
-            
-            for participantId in conversation.participants {
-                if let user = try? await firestoreService.fetchUser(userId: participantId) {
-                    loadedParticipants.append(user)
-                }
-            }
-            
-            await MainActor.run {
-                self.participants = loadedParticipants
-                self.isLoading = false
-            }
+            return conversation.participants
         } catch {
-            await MainActor.run {
-                self.isLoading = false
-            }
+            return []
         }
     }
     
-    // MARK: - Helper Functions
-    
-    /// Parse date and time from AI analysis
-    /// - Parameter analysis: The AI analysis response
-    /// - Returns: Tuple of (date, hasTime, time)
-    static func parseDateTime(from analysis: MessageAnalysisResponse) -> (Date, Bool, Date) {
-        let now = Date()
-        
-        // Default values
-        var parsedDate = now
-        var hasTime = false
-        var parsedTime = now
-        
-        // Parse date from calendar detection
-        if let dateString = analysis.calendar.date {
-            if let parsed = parseDateString(dateString) {
-                parsedDate = parsed
-            }
-        }
-        
-        // Parse time from calendar detection
-        if let timeString = analysis.calendar.time {
-            hasTime = true
-            if let parsed = parseTimeString(timeString) {
-                parsedTime = parsed
-            }
-        }
-        
-        return (parsedDate, hasTime, parsedTime)
-    }
-    
-    /// Parse ISO 8601 date string
-    private static func parseDateString(_ dateString: String) -> Date? {
-        let formatter = ISO8601DateFormatter()
+    private static func parseDate(from dateString: String?) -> Date? {
+        guard let dateString = dateString else { return nil }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
         return formatter.date(from: dateString)
     }
     
-    /// Parse time string like "8pm", "19:00", "2pm"
-    private static func parseTimeString(_ timeString: String) -> Date? {
+    private static func parseTime(from timeString: String?) -> Date? {
+        guard let timeString = timeString else { return nil }
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm"
-        
-        // Try HH:mm format first
-        if let date = formatter.date(from: timeString) {
-            return date
-        }
-        
-        // Try 12-hour format
-        formatter.dateFormat = "h:mm a"
-        if let date = formatter.date(from: timeString) {
-            return date
-        }
-        
-        // Try without minutes
-        formatter.dateFormat = "h a"
-        if let date = formatter.date(from: timeString) {
-            return date
-        }
-        
-        return nil
+        return formatter.date(from: timeString)
     }
     
     private func formatDateISO(_ date: Date) -> String {
-        let formatter = ISO8601DateFormatter()
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+    
+    private func formatTimeHHMM(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
         return formatter.string(from: date)
     }
 }
-
 
 // MARK: - Preview
 
@@ -565,17 +370,12 @@ struct ParticipantSelectionView: View {
                 title: "Party at my place",
                 date: "2024-01-19",
                 time: "20:00",
-                location: "My place"
+                location: "My place",
+                isInvitation: true
             ),
             reminder: ReminderDetection(detected: false, title: nil, dueDate: nil),
             decision: DecisionDetection(detected: false, text: nil),
             rsvp: RSVPDetection(detected: false, status: nil, eventReference: nil),
-            invitation: InvitationDetection(
-                detected: true,
-                type: "create",
-                eventTitle: "Party at my place",
-                invitationDetected: true
-            ),
             priority: PriorityDetection(detected: false, level: nil, reason: nil),
             conflict: ConflictDetection(detected: false, conflictingEvents: [])
         ),
