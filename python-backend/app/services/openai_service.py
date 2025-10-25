@@ -245,10 +245,34 @@ Current time context: {reference_time.strftime('%H:%M')}
 
 Your job is to EXTRACT temporal expressions, NOT calculate dates.
 Examples:
-- "Let's meet tomorrow at 7pm" → extract: date_expression="tomorrow", time="19:00"
-- "Dinner this Saturday" → extract: date_expression="this Saturday", time=null
-- "Coffee in 3 days at 2pm" → extract: date_expression="3 days from now", time="14:00"
-- "Meeting next Monday morning" → extract: date_expression="next Monday", time="09:00"
+- "Let's meet tomorrow at 7pm" → extract: date_expression="tomorrow", startTime="19:00", endTime=null
+- "Dinner this Saturday" → extract: date_expression="this Saturday", startTime=null, endTime=null
+- "Coffee in 3 days at 2pm" → extract: date_expression="3 days from now", startTime="14:00", endTime=null
+- "Meeting next Monday morning" → extract: date_expression="next Monday", startTime="09:00", endTime=null
+- "Meeting next Tuesday at 3pm" → extract: date_expression="next Tuesday", startTime="15:00", endTime=null
+- "Conference call next week" → extract: date_expression="next week", startTime=null, endTime=null
+- "Meeting 2pm to 4pm" → extract: startTime="14:00", endTime="16:00"
+- "Lunch from 12:30 to 1:30" → extract: startTime="12:30", endTime="13:30"
+
+RELATIVE DATE PARSING (be precise with these):
+- "next Tuesday" → date_expression="next Tuesday" (NOT "this Tuesday")
+- "this Tuesday" → date_expression="this Tuesday" (current week's Tuesday)
+- "next week" → date_expression="next week"
+- "this weekend" → date_expression="this weekend"
+- "next weekend" → date_expression="next weekend"
+- "in 2 weeks" → date_expression="in 2 weeks"
+- "next month" → date_expression="next month"
+
+CRITICAL TIME PARSING (these often fail - be precise):
+- "at noon" → startTime="12:00"
+- "7pm" → startTime="19:00"
+- "4:44pm" → startTime="16:44"
+- "midnight" → startTime="00:00"
+- "in the morning" → startTime="09:00" (default morning time)
+- "in the afternoon" → startTime="15:00" (default afternoon time)
+- "in the evening" → startTime="19:00" (default evening time)
+
+IMPORTANT: If endTime is NOT mentioned, leave it null. Backend will apply 1-hour default automatically.
 
 COMMON TIME ACRONYMS (already expanded in input):
 - EOD/end of day → 11:59 PM
@@ -281,7 +305,8 @@ Analyze the message and use the analyze_message function to return structured re
                                 "detected": {"type": "boolean", "description": "Whether a calendar event was detected"},
                                 "title": {"type": "string", "description": "Event title", "nullable": True},
                                 "date_expression": {"type": "string", "description": "Temporal expression as-is from message", "nullable": True},
-                                "time": {"type": "string", "description": "Time in HH:MM format", "nullable": True},
+                                "startTime": {"type": "string", "description": "Start time in HH:MM format (24-hour). Examples: 'noon'->12:00, '7pm'->19:00, '4:44pm'->16:44", "nullable": True},
+                                "endTime": {"type": "string", "description": "End time in HH:MM format (24-hour). If not specified, leave null to apply 1-hour default", "nullable": True},
                                 "location": {"type": "string", "description": "Event location", "nullable": True},
                                 "is_invitation": {"type": "boolean", "description": "Whether contains invitation language"}
                             },
@@ -378,7 +403,7 @@ Analyze the message and use the analyze_message function to return structured re
     def _get_default_analysis(self) -> Dict[str, Any]:
         """Return default empty analysis structure"""
         return {
-            "calendar": {"detected": False, "title": None, "date_expression": None, "time": None, "location": None, "is_invitation": False},
+            "calendar": {"detected": False, "title": None, "date_expression": None, "startTime": None, "endTime": None, "duration": None, "location": None, "is_invitation": False},
             "reminder": {"detected": False, "title": None, "date_expression": None},
             "decision": {"detected": False, "text": None},
             "rsvp": {"detected": False, "status": None, "event_reference": None},
@@ -392,7 +417,7 @@ Analyze the message and use the analyze_message function to return structured re
         complete_structure = {
             "calendar": {
                 "detected": False, "title": None, "date_expression": None, 
-                "time": None, "location": None, "is_invitation": False
+                "startTime": None, "endTime": None, "duration": None, "location": None, "is_invitation": False
             },
             "reminder": {
                 "detected": False, "title": None, "date_expression": None
@@ -477,6 +502,7 @@ Analyze the message and use the analyze_message function to return structured re
             Updated result with parsed date fields for all relevant detection types
         """
         import dateparser
+        from datetime import timedelta
         
         # Common dateparser settings
         dateparser_settings = {
@@ -485,13 +511,127 @@ Analyze the message and use the analyze_message function to return structured re
             'RETURN_AS_TIMEZONE_AWARE': False
         }
         
-        # Parse calendar date expression
+        # Parse calendar date expression with enhanced relative date handling
         if result["calendar"]["detected"] and result["calendar"]["date_expression"]:
             date_expr = result["calendar"]["date_expression"]
-            parsed_date = dateparser.parse(date_expr, settings=dateparser_settings)
+            
+            # Enhanced settings for better relative date parsing
+            enhanced_settings = dateparser_settings.copy()
+            enhanced_settings.update({
+                'PREFER_DATES_FROM': 'future',
+                'RELATIVE_BASE': reference_time,
+                'RETURN_AS_TIMEZONE_AWARE': False,
+                'PARSERS': ['relative-time', 'absolute-time', 'timestamp']
+            })
+            
+            # Special handling for "next [day]" expressions
+            if date_expr.lower().startswith('next '):
+                # Try multiple parsing strategies for "next [day]"
+                parsing_attempts = [
+                    date_expr,  # Original: "next Tuesday"
+                    f"next {date_expr.split(' ', 1)[1]}",  # Ensure "next" prefix
+                    f"next {date_expr.split(' ', 1)[1]} from {reference_time.strftime('%Y-%m-%d')}",  # With explicit date
+                ]
+                
+                # Add day-specific attempts
+                day_name = date_expr.split(' ', 1)[1].lower() if ' ' in date_expr else ''
+                if day_name in ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']:
+                    # Try different formats
+                    parsing_attempts.extend([
+                        f"next {day_name}",
+                        f"next {day_name} from {reference_time.strftime('%Y-%m-%d')}",
+                        f"next {day_name} at 12:00",  # Add time context
+                    ])
+                
+                parsed_date = None
+                for attempt in parsing_attempts:
+                    try:
+                        parsed_date = dateparser.parse(attempt, settings=enhanced_settings)
+                        if parsed_date:
+                            print(f"✅ Successfully parsed '{attempt}' → {parsed_date.strftime('%Y-%m-%d (%A)')}")
+                            break
+                    except Exception as e:
+                        print(f"⚠️ Parsing attempt failed for '{attempt}': {e}")
+                        continue
+                
+                # Final fallback: manual calculation for "next [day]"
+                if not parsed_date and day_name in ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']:
+                    try:
+                        from datetime import timedelta
+                        import calendar
+                        
+                        # Get current weekday (0=Monday, 6=Sunday)
+                        current_weekday = reference_time.weekday()
+                        target_weekday = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].index(day_name)
+                        
+                        # Calculate days until next occurrence
+                        days_ahead = target_weekday - current_weekday
+                        if days_ahead <= 0:  # Target day is this week or past
+                            days_ahead += 7  # Move to next week
+                        
+                        next_date = reference_time + timedelta(days=days_ahead)
+                        parsed_date = next_date
+                        print(f"✅ Manual fallback: 'next {day_name}' → {parsed_date.strftime('%Y-%m-%d (%A)')}")
+                    except Exception as e:
+                        print(f"⚠️ Manual fallback failed: {e}")
+            else:
+                parsed_date = dateparser.parse(date_expr, settings=enhanced_settings)
+            
             result["calendar"]["date"] = parsed_date.strftime('%Y-%m-%d') if parsed_date else None
+            
+            # Debug logging for date parsing
+            if parsed_date:
+                print(f"✅ Parsed '{date_expr}' → {parsed_date.strftime('%Y-%m-%d (%A)')}")
+            else:
+                print(f"⚠️ Failed to parse date expression: '{date_expr}'")
         else:
             result["calendar"]["date"] = None
+        
+        # CRITICAL: Apply 1-hour default duration if endTime not specified
+        if result["calendar"]["detected"] and result["calendar"]["startTime"]:
+            start_time = result["calendar"]["startTime"]
+            end_time = result["calendar"]["endTime"]
+            
+            # Enhanced time parsing with dateparser for robustness
+            start_time = self._parse_time_with_fallback(start_time, reference_time)
+            result["calendar"]["startTime"] = start_time
+            
+            if not end_time:
+                # Apply 1-hour default
+                try:
+                    start_hour, start_minute = map(int, start_time.split(':'))
+                    end_hour = (start_hour + 1) % 24
+                    end_time = f"{end_hour:02d}:{start_minute:02d}"
+                    result["calendar"]["endTime"] = end_time
+                    print(f"✅ Applied 1-hour default: {start_time} → {end_time}")
+                except (ValueError, AttributeError) as e:
+                    print(f"⚠️ Failed to apply 1-hour default: {e}")
+                    result["calendar"]["endTime"] = None
+            else:
+                # Parse end time with fallback
+                end_time = self._parse_time_with_fallback(end_time, reference_time)
+                result["calendar"]["endTime"] = end_time
+            
+            # Calculate duration in minutes
+            if start_time and end_time:
+                try:
+                    start_hour, start_minute = map(int, start_time.split(':'))
+                    end_hour, end_minute = map(int, end_time.split(':'))
+                    start_minutes = start_hour * 60 + start_minute
+                    end_minutes = end_hour * 60 + end_minute
+                    
+                    # Handle overnight events (end time is next day)
+                    if end_minutes < start_minutes:
+                        end_minutes += 24 * 60
+                    
+                    duration = end_minutes - start_minutes
+                    result["calendar"]["duration"] = duration
+                    print(f"✅ Calculated duration: {duration} minutes ({start_time} to {end_time})")
+                except (ValueError, AttributeError) as e:
+                    print(f"⚠️ Failed to calculate duration: {e}")
+                    result["calendar"]["duration"] = 60  # Default to 1 hour
+        else:
+            result["calendar"]["duration"] = None
         
         # Parse reminder date expression
         if result["reminder"]["detected"] and result["reminder"]["date_expression"]:
@@ -568,7 +708,6 @@ Analyze the message and use the analyze_message function to return structured re
                     # Default deadline based on priority level
                     if result["priority"]["level"] == "high":
                         # High priority: 1 hour from now
-                        from datetime import timedelta
                         deadline = reference_time + timedelta(hours=1)
                         result["priority"]["deadline"] = deadline.strftime('%Y-%m-%d %H:%M:%S')
                     elif result["priority"]["level"] == "medium":
@@ -589,6 +728,49 @@ Analyze the message and use the analyze_message function to return structured re
             result["conflict"]["detected_at"] = None
         
         return result
+    
+    def _parse_time_with_fallback(self, time_str: str, reference_time) -> str:
+        """
+        Parse time string with fallback using dateparser for robustness
+        Handles problematic times like "noon", "7pm", "4:44pm"
+        
+        Args:
+            time_str: Time string to parse
+            reference_time: Reference datetime for context
+            
+        Returns:
+            Time in HH:MM format (24-hour)
+        """
+        import dateparser
+        
+        # If already in HH:MM format, return as is
+        if time_str and ':' in time_str and len(time_str.split(':')[0]) <= 2:
+            try:
+                parts = time_str.split(':')
+                hour = int(parts[0])
+                minute = int(parts[1])
+                if 0 <= hour <= 23 and 0 <= minute <= 59:
+                    return f"{hour:02d}:{minute:02d}"
+            except (ValueError, IndexError):
+                pass
+        
+        # Use dateparser for natural language times
+        try:
+            parsed = dateparser.parse(
+                time_str,
+                settings={
+                    'RELATIVE_BASE': reference_time,
+                    'PREFER_DATES_FROM': 'future',
+                    'RETURN_AS_TIMEZONE_AWARE': False
+                }
+            )
+            if parsed:
+                return parsed.strftime('%H:%M')
+        except Exception as e:
+            print(f"⚠️ dateparser failed for '{time_str}': {e}")
+        
+        # Fallback: Return original if can't parse
+        return time_str if time_str else None
 
 
 # Singleton instance

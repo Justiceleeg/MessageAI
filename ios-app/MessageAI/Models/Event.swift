@@ -18,7 +18,9 @@ struct Event: Identifiable, Codable, Hashable {
     let eventId: String
     let title: String
     let date: Date
-    let time: String?           // "HH:mm" format, optional
+    let startTime: String?      // "HH:mm" format (24-hour), optional
+    let endTime: String?        // "HH:mm" format (24-hour), optional  
+    let duration: Int?          // Duration in minutes
     let location: String?
     let creatorUserId: String
     let createdAt: Date
@@ -35,7 +37,9 @@ struct Event: Identifiable, Codable, Hashable {
         case eventId
         case title
         case date
-        case time
+        case startTime
+        case endTime
+        case duration
         case location
         case creatorUserId
         case createdAt
@@ -61,8 +65,14 @@ struct Event: Identifiable, Codable, Hashable {
         try container.encode(attendees, forKey: .attendees)
         
         // Only encode optional fields if they have values
-        if let time = time, !time.isEmpty {
-            try container.encode(time, forKey: .time)
+        if let startTime = startTime, !startTime.isEmpty {
+            try container.encode(startTime, forKey: .startTime)
+        }
+        if let endTime = endTime, !endTime.isEmpty {
+            try container.encode(endTime, forKey: .endTime)
+        }
+        if let duration = duration {
+            try container.encode(duration, forKey: .duration)
         }
         if let location = location, !location.isEmpty {
             try container.encode(location, forKey: .location)
@@ -75,7 +85,9 @@ struct Event: Identifiable, Codable, Hashable {
         eventId: String = UUID().uuidString,
         title: String,
         date: Date,
-        time: String? = nil,
+        startTime: String? = nil,
+        endTime: String? = nil,
+        duration: Int? = nil,
         location: String? = nil,
         creatorUserId: String,
         createdAt: Date = Date(),
@@ -87,7 +99,9 @@ struct Event: Identifiable, Codable, Hashable {
         self.eventId = eventId
         self.title = title
         self.date = date
-        self.time = time
+        self.startTime = startTime
+        self.endTime = endTime
+        self.duration = duration
         self.location = location
         self.creatorUserId = creatorUserId
         self.createdAt = createdAt

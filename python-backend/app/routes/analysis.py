@@ -73,7 +73,9 @@ async def analyze_message(request: MessageAnalysisRequest):
                 detected=analysis["calendar"]["detected"],
                 title=analysis["calendar"]["title"],
                 date=analysis["calendar"].get("date"),  # Use the parsed date
-                time=analysis["calendar"]["time"],
+                startTime=analysis["calendar"].get("startTime"),
+                endTime=analysis["calendar"].get("endTime"),
+                duration=analysis["calendar"].get("duration"),
                 location=analysis["calendar"]["location"],
                 is_invitation=analysis["calendar"].get("is_invitation", False)
             ),

@@ -106,12 +106,27 @@ struct EventDetailView: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
             
-            HStack {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(formattedDate)
                     .font(.body)
-                if let time = event.time {
-                    Text("at \(time)")
-                        .font(.body)
+                
+                if let startTime = event.startTime {
+                    HStack(spacing: 4) {
+                        Text(formatTime(startTime))
+                        if let endTime = event.endTime {
+                            Text("–")
+                            Text(formatTime(endTime))
+                        }
+                        
+                        // Show duration
+                        if let duration = event.duration {
+                            Text("•")
+                                .foregroundColor(.secondary)
+                            Text(formatDuration(duration))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .font(.body)
                 }
             }
         }
@@ -304,6 +319,33 @@ struct EventDetailView: View {
         return formatter.string(from: event.date)
     }
     
+    private func formatTime(_ timeString: String) -> String {
+        // Input: "HH:mm" (24-hour), Output: "h:mm a" (12-hour)
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        
+        if let date = formatter.date(from: timeString) {
+            formatter.dateFormat = "h:mm a"
+            return formatter.string(from: date)
+        }
+        
+        return timeString
+    }
+    
+    private func formatDuration(_ minutes: Int) -> String {
+        if minutes < 60 {
+            return "(\(minutes) min)"
+        } else {
+            let hours = minutes / 60
+            let remainingMinutes = minutes % 60
+            if remainingMinutes == 0 {
+                return "(\(hours) hr)"
+            } else {
+                return "(\(hours) hr \(remainingMinutes) min)"
+            }
+        }
+    }
+    
     // MARK: - Navigation (Story 5.1.6)
     
     private func navigateToMessage() {
@@ -477,7 +519,9 @@ struct LinkedChatRowView: View {
         event: Event(
             title: "Team Meeting",
             date: Date(),
-            time: "10:00 AM",
+            startTime: "10:00",
+            endTime: "11:30",
+            duration: 90,
             location: "Conference Room",
             creatorUserId: "user123",
             createdInConversationId: "conv456",

@@ -186,7 +186,9 @@ class AIBackendService {
     func createEvent(
         title: String,
         date: String,
-        time: String?,
+        startTime: String?,
+        endTime: String?,
+        duration: Int?,
         location: String?,
         userId: String,
         conversationId: String,
@@ -195,7 +197,9 @@ class AIBackendService {
         let request = EventCreateRequest(
             title: title,
             date: date,
-            time: time,
+            startTime: startTime,
+            endTime: endTime,
+            duration: duration,
             location: location,
             userId: userId,
             conversationId: conversationId,
@@ -408,7 +412,9 @@ struct MessageAnalysisRequest: Codable {
 struct EventCreateRequest: Codable {
     let title: String
     let date: String
-    let time: String?
+    let startTime: String?
+    let endTime: String?
+    let duration: Int?
     let location: String?
     let userId: String
     let conversationId: String
@@ -417,7 +423,9 @@ struct EventCreateRequest: Codable {
     enum CodingKeys: String, CodingKey {
         case title
         case date
-        case time
+        case startTime = "start_time"
+        case endTime = "end_time"
+        case duration
         case location
         case userId = "user_id"
         case conversationId = "conversation_id"
@@ -466,7 +474,9 @@ struct CalendarDetection: Codable {
     let detected: Bool
     let title: String?
     let date: String?  // ISO 8601
-    let time: String?  // HH:MM
+    let startTime: String?  // HH:MM (24-hour)
+    let endTime: String?  // HH:MM (24-hour)
+    let duration: Int?  // Duration in minutes
     let location: String?
     let isInvitation: Bool  // Whether this event contains invitation language
     
@@ -474,7 +484,9 @@ struct CalendarDetection: Codable {
         case detected
         case title
         case date
-        case time
+        case startTime
+        case endTime
+        case duration
         case location
         case isInvitation = "is_invitation"
     }

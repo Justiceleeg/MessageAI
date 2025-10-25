@@ -179,7 +179,9 @@ class CalendarDetection(BaseModel):
     detected: bool = Field(..., description="Whether a calendar event was detected")
     title: Optional[str] = Field(None, description="Event title")
     date: Optional[str] = Field(None, description="Event date (ISO 8601)")
-    time: Optional[str] = Field(None, description="Event time (HH:MM)")
+    startTime: Optional[str] = Field(None, description="Event start time (HH:MM 24-hour format)")
+    endTime: Optional[str] = Field(None, description="Event end time (HH:MM 24-hour format)")
+    duration: Optional[int] = Field(None, description="Event duration in minutes")
     location: Optional[str] = Field(None, description="Event location")
     is_invitation: bool = Field(False, description="Whether this event contains invitation language")
 
@@ -243,7 +245,9 @@ class MessageAnalysisResponse(BaseModel):
                     "detected": True,
                     "title": "Coffee meeting",
                     "date": "2025-10-27",
-                    "time": "15:00",
+                    "startTime": "15:00",
+                    "endTime": "16:00",
+                    "duration": 60,
                     "location": "Starbucks",
                     "is_invitation": False
                 },

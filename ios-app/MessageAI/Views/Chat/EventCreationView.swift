@@ -21,7 +21,8 @@ struct EventCreationView: View {
     @State private var title: String
     @State private var date: Date
     @State private var hasTime: Bool
-    @State private var time: Date
+    @State private var startTime: Date
+    @State private var endTime: Date
     @State private var location: String
     
     // State
@@ -54,8 +55,19 @@ struct EventCreationView: View {
         // Initialize state from AI data
         _title = State(initialValue: initialData.title ?? "")
         _date = State(initialValue: Self.parseDate(initialData.date) ?? Date())
-        _hasTime = State(initialValue: initialData.time != nil)
-        _time = State(initialValue: Self.parseTime(initialData.time) ?? Date())
+        _hasTime = State(initialValue: initialData.startTime != nil)
+        
+        // Parse start and end times
+        let parsedStartTime = Self.parseTime(initialData.startTime) ?? Date()
+        _startTime = State(initialValue: parsedStartTime)
+        
+        // If endTime provided, use it; otherwise default to startTime + 1 hour
+        if let endTimeStr = initialData.endTime {
+            _endTime = State(initialValue: Self.parseTime(endTimeStr) ?? Self.addHour(to: parsedStartTime))
+        } else {
+            _endTime = State(initialValue: Self.addHour(to: parsedStartTime))
+        }
+        
         _location = State(initialValue: initialData.location ?? "")
     }
     
@@ -77,7 +89,27 @@ struct EventCreationView: View {
                     Toggle("Specific Time", isOn: $hasTime)
                     
                     if hasTime {
-                        DatePicker("Time", selection: $time, displayedComponents: .hourAndMinute)
+                        DatePicker("Start Time", selection: $startTime, displayedComponents: .hourAndMinute)
+                            .onChange(of: startTime) { oldValue, newValue in
+                                // Auto-update end time to maintain 1-hour default duration
+                                if endTime <= newValue {
+                                    endTime = Self.addHour(to: newValue)
+                                }
+                            }
+                        
+                        DatePicker("End Time", selection: $endTime, displayedComponents: .hourAndMinute)
+                        
+                        // Show duration
+                        let duration = Self.calculateDuration(from: startTime, to: endTime)
+                        if duration > 0 {
+                            Text("Duration: \(Self.formatDuration(duration))")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        } else {
+                            Text("End time must be after start time")
+                                .font(.caption)
+                                .foregroundColor(.red)
+                        }
                     }
                 } header: {
                     Text("When")
@@ -156,13 +188,22 @@ struct EventCreationView: View {
             
             // Format date and time
             let dateString = formatDateISO(date)
-            let timeString = hasTime ? formatTimeHHMM(time) : nil
+            let startTimeString = hasTime ? formatTimeHHMM(startTime) : nil
+            let endTimeString = hasTime ? formatTimeHHMM(endTime) : nil
+            let duration = hasTime ? Self.calculateDuration(from: startTime, to: endTime) : nil
+            
+            // Validate end time is after start time
+            if hasTime && duration != nil && duration! <= 0 {
+                throw NSError(domain: "EventCreation", code: 400, userInfo: [NSLocalizedDescriptionKey: "End time must be after start time"])
+            }
             
             // Call backend to check for duplicates and create event
             let response = try await aiBackendService.createEvent(
                 title: title,
                 date: dateString,
-                time: timeString,
+                startTime: startTimeString,
+                endTime: endTimeString,
+                duration: duration,
                 location: location.isEmpty ? nil : location,
                 userId: userId,
                 conversationId: conversationId,
@@ -194,7 +235,9 @@ struct EventCreationView: View {
                 eventId: eventId,
                 title: title,
                 date: date,
-                time: timeString,
+                startTime: startTimeString,
+                endTime: endTimeString,
+                duration: duration,
                 location: location.isEmpty ? nil : location,
                 creatorUserId: userId,
                 createdAt: Date(),
@@ -246,6 +289,30 @@ struct EventCreationView: View {
         return formatter.date(from: timeString)
     }
     
+    private static func addHour(to date: Date) -> Date {
+        Calendar.current.date(byAdding: .hour, value: 1, to: date) ?? date
+    }
+    
+    private static func calculateDuration(from startTime: Date, to endTime: Date) -> Int {
+        // Return duration in minutes
+        let components = Calendar.current.dateComponents([.minute], from: startTime, to: endTime)
+        return components.minute ?? 0
+    }
+    
+    private static func formatDuration(_ minutes: Int) -> String {
+        if minutes < 60 {
+            return "\(minutes) min"
+        } else {
+            let hours = minutes / 60
+            let remainingMinutes = minutes % 60
+            if remainingMinutes == 0 {
+                return "\(hours) hr"
+            } else {
+                return "\(hours) hr \(remainingMinutes) min"
+            }
+        }
+    }
+    
     private func formatDateISO(_ date: Date) -> String {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withFullDate]
@@ -267,7 +334,9 @@ struct EventCreationView: View {
             detected: true,
             title: "Coffee meeting",
             date: "2025-10-27",
-            time: "15:00",
+            startTime: "15:00",
+            endTime: "16:00",
+            duration: 60,
             location: "Starbucks",
             isInvitation: false
         ),

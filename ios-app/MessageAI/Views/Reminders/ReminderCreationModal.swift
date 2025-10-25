@@ -218,7 +218,9 @@ enum ReminderTiming: String, CaseIterable {
                 detected: false,
                 title: nil,
                 date: nil,
-                time: nil,
+                startTime: nil,
+                endTime: nil,
+                duration: nil,
                 location: nil,
                 isInvitation: false
             ),

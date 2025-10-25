@@ -17,7 +17,9 @@ class EventEntity {
     @Attribute(.unique) var eventId: String
     var title: String
     var date: Date
-    var time: String?
+    var startTime: String?
+    var endTime: String?
+    var duration: Int?
     var location: String?
     var creatorUserId: String
     var createdAt: Date
@@ -34,7 +36,9 @@ class EventEntity {
         eventId: String,
         title: String,
         date: Date,
-        time: String? = nil,
+        startTime: String? = nil,
+        endTime: String? = nil,
+        duration: Int? = nil,
         location: String? = nil,
         creatorUserId: String,
         createdAt: Date,
@@ -46,7 +50,9 @@ class EventEntity {
         self.eventId = eventId
         self.title = title
         self.date = date
-        self.time = time
+        self.startTime = startTime
+        self.endTime = endTime
+        self.duration = duration
         self.location = location
         self.creatorUserId = creatorUserId
         self.createdAt = createdAt
@@ -76,7 +82,9 @@ extension EventEntity {
             eventId: event.eventId,
             title: event.title,
             date: event.date,
-            time: event.time,
+            startTime: event.startTime,
+            endTime: event.endTime,
+            duration: event.duration,
             location: event.location,
             creatorUserId: event.creatorUserId,
             createdAt: event.createdAt,
@@ -103,7 +111,9 @@ extension EventEntity {
             eventId: eventId,
             title: title,
             date: date,
-            time: time,
+            startTime: startTime,
+            endTime: endTime,
+            duration: duration,
             location: location,
             creatorUserId: creatorUserId,
             createdAt: createdAt,

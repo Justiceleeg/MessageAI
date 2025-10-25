@@ -13,7 +13,8 @@ struct EventInvitationModal: View {
     @State private var title: String
     @State private var date: Date
     @State private var hasTime: Bool
-    @State private var time: Date
+    @State private var startTime: Date
+    @State private var endTime: Date
     @State private var location: String
     
     // Invitation settings
@@ -43,20 +44,39 @@ struct EventInvitationModal: View {
         if let calendarData = calendarData {
             self._title = State(initialValue: calendarData.title ?? "")
             self._date = State(initialValue: Self.parseDate(from: calendarData.date) ?? Date())
-            self._hasTime = State(initialValue: calendarData.time != nil)
-            self._time = State(initialValue: Self.parseTime(from: calendarData.time) ?? Date())
+            self._hasTime = State(initialValue: calendarData.startTime != nil)
+            
+            let parsedStartTime = Self.parseTime(from: calendarData.startTime) ?? Date()
+            self._startTime = State(initialValue: parsedStartTime)
+            
+            if let endTimeStr = calendarData.endTime {
+                self._endTime = State(initialValue: Self.parseTime(from: endTimeStr) ?? Self.addHour(to: parsedStartTime))
+            } else {
+                self._endTime = State(initialValue: Self.addHour(to: parsedStartTime))
+            }
+            
             self._location = State(initialValue: calendarData.location ?? "")
         } else if let analysis = analysis {
             self._title = State(initialValue: analysis.calendar.title ?? "")
             self._date = State(initialValue: Self.parseDate(from: analysis.calendar.date) ?? Date())
-            self._hasTime = State(initialValue: analysis.calendar.time != nil)
-            self._time = State(initialValue: Self.parseTime(from: analysis.calendar.time) ?? Date())
+            self._hasTime = State(initialValue: analysis.calendar.startTime != nil)
+            
+            let parsedStartTime = Self.parseTime(from: analysis.calendar.startTime) ?? Date()
+            self._startTime = State(initialValue: parsedStartTime)
+            
+            if let endTimeStr = analysis.calendar.endTime {
+                self._endTime = State(initialValue: Self.parseTime(from: endTimeStr) ?? Self.addHour(to: parsedStartTime))
+            } else {
+                self._endTime = State(initialValue: Self.addHour(to: parsedStartTime))
+            }
+            
             self._location = State(initialValue: analysis.calendar.location ?? "")
         } else {
             self._title = State(initialValue: "")
             self._date = State(initialValue: Date())
             self._hasTime = State(initialValue: false)
-            self._time = State(initialValue: Date())
+            self._startTime = State(initialValue: Date())
+            self._endTime = State(initialValue: Self.addHour(to: Date()))
             self._location = State(initialValue: "")
         }
     }
@@ -76,7 +96,27 @@ struct EventInvitationModal: View {
                     Toggle("Add time", isOn: $hasTime)
                     
                     if hasTime {
-                        DatePicker("Time", selection: $time, displayedComponents: .hourAndMinute)
+                        DatePicker("Start Time", selection: $startTime, displayedComponents: .hourAndMinute)
+                            .onChange(of: startTime) { oldValue, newValue in
+                                // Auto-update end time to maintain duration
+                                if endTime <= newValue {
+                                    endTime = Self.addHour(to: newValue)
+                                }
+                            }
+                        
+                        DatePicker("End Time", selection: $endTime, displayedComponents: .hourAndMinute)
+                        
+                        // Show duration
+                        let duration = Self.calculateDuration(from: startTime, to: endTime)
+                        if duration > 0 {
+                            Text("Duration: \(Self.formatDuration(duration))")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        } else {
+                            Text("End time must be after start time")
+                                .font(.caption)
+                                .foregroundColor(.red)
+                        }
                     }
                 } header: {
                     Text("When")
@@ -133,7 +173,7 @@ struct EventInvitationModal: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button("Cancel") {
-                        // Dismiss modal
+                        dismiss()
                     }
                 }
                 
@@ -172,14 +212,23 @@ struct EventInvitationModal: View {
             
             // Format date and time
             let dateString = formatDateISO(date)
-            let timeString = hasTime ? formatTimeHHMM(time) : nil
+            let startTimeString = hasTime ? formatTimeHHMM(startTime) : nil
+            let endTimeString = hasTime ? formatTimeHHMM(endTime) : nil
+            let duration = hasTime ? Self.calculateDuration(from: startTime, to: endTime) : nil
+            
+            // Validate end time is after start time
+            if hasTime && duration != nil && duration! <= 0 {
+                throw NSError(domain: "EventInvitation", code: 400, userInfo: [NSLocalizedDescriptionKey: "End time must be after start time"])
+            }
             
             // Call backend to create event
-            print("🔍 Creating event: title=\(title), date=\(dateString), time=\(timeString ?? "nil"), location=\(location.isEmpty ? "nil" : location)")
+            print("🔍 Creating event: title=\(title), date=\(dateString), startTime=\(startTimeString ?? "nil"), endTime=\(endTimeString ?? "nil"), duration=\(duration ?? 0), location=\(location.isEmpty ? "nil" : location)")
             let response = try await aiBackendService.createEvent(
                 title: title,
                 date: dateString,
-                time: timeString,
+                startTime: startTimeString,
+                endTime: endTimeString,
+                duration: duration,
                 location: location.isEmpty ? nil : location,
                 userId: userId,
                 conversationId: conversationId,
@@ -235,7 +284,9 @@ struct EventInvitationModal: View {
                     eventId: eventId,
                     title: title,
                     date: date,
-                    time: timeString,
+                    startTime: startTimeString,
+                    endTime: endTimeString,
+                    duration: duration,
                     location: location.isEmpty ? nil : location,
                     creatorUserId: userId,
                     createdAt: Date(),
@@ -298,7 +349,9 @@ struct EventInvitationModal: View {
                 eventId: suggestedEvent.eventId ?? "",
                 title: suggestedEvent.title ?? title,
                 date: Self.parseDate(from: suggestedEvent.date) ?? date,
-                time: hasTime ? formatTimeHHMM(time) : nil,
+                startTime: hasTime ? formatTimeHHMM(startTime) : nil,
+                endTime: hasTime ? formatTimeHHMM(endTime) : nil,
+                duration: hasTime ? Self.calculateDuration(from: startTime, to: endTime) : nil,
                 location: location.isEmpty ? nil : location,
                 creatorUserId: userId,
                 createdAt: Date(),
@@ -346,6 +399,30 @@ struct EventInvitationModal: View {
         return formatter.date(from: timeString)
     }
     
+    private static func addHour(to date: Date) -> Date {
+        Calendar.current.date(byAdding: .hour, value: 1, to: date) ?? date
+    }
+    
+    private static func calculateDuration(from startTime: Date, to endTime: Date) -> Int {
+        // Return duration in minutes
+        let components = Calendar.current.dateComponents([.minute], from: startTime, to: endTime)
+        return components.minute ?? 0
+    }
+    
+    private static func formatDuration(_ minutes: Int) -> String {
+        if minutes < 60 {
+            return "\(minutes) min"
+        } else {
+            let hours = minutes / 60
+            let remainingMinutes = minutes % 60
+            if remainingMinutes == 0 {
+                return "\(hours) hr"
+            } else {
+                return "\(hours) hr \(remainingMinutes) min"
+            }
+        }
+    }
+    
     private func formatDateISO(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
@@ -369,7 +446,9 @@ struct EventInvitationModal: View {
                 detected: true,
                 title: "Party at my place",
                 date: "2024-01-19",
-                time: "20:00",
+                startTime: "20:00",
+                endTime: "23:00",
+                duration: 180,
                 location: "My place",
                 isInvitation: true
             ),

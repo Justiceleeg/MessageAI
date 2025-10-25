@@ -7,6 +7,17 @@
 
 import SwiftUI
 
+/// Calendar day item with unique ID for ForEach
+struct CalendarDayItem: Identifiable {
+    let id: UUID
+    let date: Date?
+    
+    init(date: Date?) {
+        self.id = UUID()
+        self.date = date
+    }
+}
+
 /// Calendar grid view showing events with native SwiftUI implementation
 struct EventsCalendarView: View {
     
@@ -91,8 +102,8 @@ struct EventsCalendarView: View {
     
     private var calendarGrid: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 7), spacing: 4) {
-            ForEach(daysInMonth, id: \.self) { date in
-                if let date = date {
+            ForEach(calendarDayItems, id: \.id) { dayItem in
+                if let date = dayItem.date {
                     dayCell(for: date)
                 } else {
                     // Empty cell for padding
@@ -111,25 +122,30 @@ struct EventsCalendarView: View {
         return Button {
             selectedDate = date
         } label: {
-            VStack(spacing: 4) {
+            ZStack {
+                // Background
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isSelected ? Color.blue : (isToday ? Color.blue.opacity(0.1) : Color.clear))
+                
+                // Date number - always centered
                 Text("\(calendar.component(.day, from: date))")
                     .font(.system(size: 16))
                     .fontWeight(isSelected ? .bold : .regular)
                     .foregroundColor(isSelected ? .white : (isToday ? .blue : .primary))
                 
-                // Event indicator dots
+                // Event indicator dot - positioned at bottom without affecting date position
                 if hasEvents {
-                    Circle()
-                        .fill(isSelected ? Color.white : Color.blue)
-                        .frame(width: 4, height: 4)
+                    VStack {
+                        Spacer()
+                        Circle()
+                            .fill(isSelected ? Color.white : Color.blue)
+                            .frame(width: 4, height: 4)
+                            .padding(.bottom, 4)
+                    }
                 }
             }
             .frame(height: 50)
             .frame(maxWidth: .infinity)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(isSelected ? Color.blue : (isToday ? Color.blue.opacity(0.1) : Color.clear))
-            )
         }
         .buttonStyle(.plain)
     }
@@ -179,28 +195,28 @@ struct EventsCalendarView: View {
         return formatter.string(from: displayedMonth)
     }
     
-    private var daysInMonth: [Date?] {
+    private var calendarDayItems: [CalendarDayItem] {
         guard let monthInterval = calendar.dateInterval(of: .month, for: displayedMonth),
               let _ = calendar.dateInterval(of: .weekOfMonth, for: monthInterval.start)?.start else {
             return []
         }
         
-        var days: [Date?] = []
+        var dayItems: [CalendarDayItem] = []
         let daysBefore = calendar.component(.weekday, from: monthInterval.start) - 1
         
         // Add empty cells for days before month starts
         for _ in 0..<daysBefore {
-            days.append(nil)
+            dayItems.append(CalendarDayItem(date: nil))
         }
         
         // Add all days in the month
         var currentDate = monthInterval.start
         while currentDate < monthInterval.end {
-            days.append(currentDate)
+            dayItems.append(CalendarDayItem(date: currentDate))
             currentDate = calendar.date(byAdding: .day, value: 1, to: currentDate)!
         }
         
-        return days
+        return dayItems
     }
     
     private var eventsForSelectedDate: [Event] {
@@ -230,11 +246,18 @@ struct EventRowView: View {
         HStack(spacing: 12) {
             // Time indicator
             VStack(alignment: .leading, spacing: 4) {
-                if let time = event.time {
-                    Text(time)
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.primary)
+                if let startTime = event.startTime {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(formatTime(startTime))
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.primary)
+                        if let endTime = event.endTime {
+                            Text(formatTime(endTime))
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                    }
                 } else {
                     Text("All day")
                         .font(.caption)
@@ -283,6 +306,19 @@ struct EventRowView: View {
                 .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
         )
     }
+    
+    private func formatTime(_ timeString: String) -> String {
+        // Input: "HH:mm" (24-hour), Output: "h:mm a" (12-hour)
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        
+        if let date = formatter.date(from: timeString) {
+            formatter.dateFormat = "h:mm a"
+            return formatter.string(from: date)
+        }
+        
+        return timeString
+    }
 }
 
 // MARK: - Preview
@@ -293,7 +329,9 @@ struct EventRowView: View {
             Event(
                 title: "Team Meeting",
                 date: Date(),
-                time: "10:00 AM",
+                startTime: "10:00",
+                endTime: "11:00",
+                duration: 60,
                 location: "Conference Room",
                 creatorUserId: "user1",
                 createdInConversationId: "conv1",
@@ -302,7 +340,9 @@ struct EventRowView: View {
             Event(
                 title: "Lunch with Client",
                 date: Date(),
-                time: "12:30 PM",
+                startTime: "12:30",
+                endTime: "14:00",
+                duration: 90,
                 location: "Downtown Cafe",
                 creatorUserId: "user1",
                 createdInConversationId: "conv1",
