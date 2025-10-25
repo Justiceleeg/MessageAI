@@ -21,6 +21,14 @@ struct MessageBubbleView<AIPrompt: View>: View {
     let shouldShowReadReceipt: Bool  // Whether to show read receipt on this message (Story 4.1 UX)
     let aiPrompt: AIPrompt?  // Optional AI prompt view (Story 5.1)
     let isHighlighted: Bool  // Whether this message should be highlighted (Story 5.1.6)
+    let conversationId: String?  // Conversation ID for RSVP actions (Story 5.4)
+    
+    // RSVP Modal State
+    @State private var showRSVPModal = false
+    @State private var selectedRSVPStatus: RSVPStatus = .accepted
+    @State private var userRSVPStatus: RSVPStatus? = nil
+    @State private var eventDate: Date? = nil
+    @State private var isLoadingEventData = true
     
     // MARK: - Initialization
     
@@ -35,6 +43,7 @@ struct MessageBubbleView<AIPrompt: View>: View {
         readCount: Int = 0,
         shouldShowReadReceipt: Bool = false,
         isHighlighted: Bool = false,
+        conversationId: String? = nil,
         @ViewBuilder aiPrompt: () -> AIPrompt? = { nil }
     ) {
         self.message = message
@@ -43,11 +52,126 @@ struct MessageBubbleView<AIPrompt: View>: View {
         self.onRetry = onRetry
         self.isGroupChat = isGroupChat
         self.senderName = senderName
+    
         self.isOnline = isOnline
         self.readCount = readCount
         self.shouldShowReadReceipt = shouldShowReadReceipt
         self.isHighlighted = isHighlighted
+        self.conversationId = conversationId
         self.aiPrompt = aiPrompt()
+    }
+    
+    // MARK: - Computed Properties
+    
+    @ViewBuilder
+    private var rsvpSection: some View {
+        if !isSentByCurrentUser,
+           let metadata = message.metadata,
+           metadata.isInvitation == true,
+           let eventId = metadata.eventId,
+           let conversationId = conversationId,
+           shouldShowRSVPButtons {
+            
+            RSVPQuickActionsView(
+                eventId: eventId,
+                eventTitle: message.text, // Use message text as event title for now
+                conversationId: conversationId,
+                onAccept: {
+                    selectedRSVPStatus = .accepted
+                    showRSVPModal = true
+                },
+                onDecline: {
+                    selectedRSVPStatus = .declined
+                    showRSVPModal = true
+                }
+            )
+            .padding(.horizontal, 12)
+            .padding(.top, 4)
+        }
+    }
+    
+    /// Determines if RSVP buttons should be shown
+    /// Hides buttons if user has already RSVP'd or event has passed
+    private var shouldShowRSVPButtons: Bool {
+        guard let metadata = message.metadata,
+              let eventId = metadata.eventId else {
+            return false
+        }
+        
+        // Don't show buttons while loading event data to prevent flash
+        if isLoadingEventData {
+            return false
+        }
+        
+        // Debug logging
+        print("🔧 DEBUG: shouldShowRSVPButtons - userRSVPStatus: \(userRSVPStatus?.rawValue ?? "nil")")
+        print("🔧 DEBUG: shouldShowRSVPButtons - eventDate: \(eventDate?.description ?? "nil")")
+        
+        // Hide buttons if user has already RSVP'd
+        if let rsvpStatus = userRSVPStatus, rsvpStatus != .pending {
+            print("🔧 DEBUG: Hiding buttons - user already RSVP'd: \(rsvpStatus.rawValue)")
+            return false
+        }
+        
+        // Hide buttons if event has passed
+        if let eventDate = eventDate, eventDate < Date() {
+            print("🔧 DEBUG: Hiding buttons - event has passed")
+            return false
+        }
+        
+        print("🔧 DEBUG: Showing RSVP buttons")
+        return true
+    }
+    
+    // MARK: - Event Data Loading
+    
+    /// Loads event data to determine if RSVP buttons should be shown
+    private func loadEventData() {
+        guard let metadata = message.metadata,
+              let eventId = metadata.eventId else {
+            isLoadingEventData = false
+            return
+        }
+        
+        Task {
+            do {
+                let eventService = EventService()
+                if let event = try await eventService.getEvent(id: eventId) {
+                    await MainActor.run {
+                        print("🔧 DEBUG: loadEventData - setting eventDate: \(event.date)")
+                        self.eventDate = event.date
+                        
+                        // Check if current user has already RSVP'd
+                        if let currentUserId = AuthService.shared.currentUser?.userId,
+                           let attendee = event.attendees[currentUserId] {
+                            print("🔧 DEBUG: loadEventData - found existing RSVP: \(attendee.status.rawValue)")
+                            // Only update if we don't already have a local state (to avoid overriding user actions)
+                            if self.userRSVPStatus == nil {
+                                print("🔧 DEBUG: loadEventData - setting userRSVPStatus to \(attendee.status.rawValue)")
+                                self.userRSVPStatus = attendee.status
+                            } else {
+                                print("🔧 DEBUG: loadEventData - keeping existing userRSVPStatus: \(self.userRSVPStatus?.rawValue ?? "nil")")
+                            }
+                        } else {
+                            print("🔧 DEBUG: loadEventData - no existing RSVP found for user")
+                        }
+                        
+                        // Mark loading as complete
+                        self.isLoadingEventData = false
+                    }
+                } else {
+                    await MainActor.run {
+                        self.isLoadingEventData = false
+                    }
+                }
+            } catch {
+                // Event might not exist or user doesn't have access
+                print("Could not load event data: \(error.localizedDescription)")
+                await MainActor.run {
+                    self.isLoadingEventData = false
+                }
+            }
+        }
     }
     
     // MARK: - Body
@@ -99,6 +223,10 @@ struct MessageBubbleView<AIPrompt: View>: View {
                 }
             }
             
+            // RSVP Quick Actions (Story 5.4) - for invitation messages
+            
+            rsvpSection
+            
             // Timestamp, AI prompt, and status indicator (all on same line)
             HStack(spacing: 4) {
                 // AI Prompt (Story 5.1) - appears first, before timestamp
@@ -130,6 +258,27 @@ struct MessageBubbleView<AIPrompt: View>: View {
             // Only tappable if failed and onRetry is provided
             if message.status == "failed", let onRetry = onRetry {
                 onRetry()
+            }
+        }
+        .onAppear {
+            loadEventData()
+        }
+        .sheet(isPresented: $showRSVPModal) {
+            if let conversationId = conversationId,
+               let metadata = message.metadata,
+               let eventId = metadata.eventId {
+                RSVPModal(
+                    eventId: eventId,
+                    eventTitle: message.text,
+                    conversationId: conversationId,
+                    preSelectedStatus: selectedRSVPStatus
+                ) { status, message in
+                    print("🔧 DEBUG: RSVP confirmed: \(status), message: \(message ?? "none")")
+                    print("🔧 DEBUG: Updating userRSVPStatus from \(userRSVPStatus?.rawValue ?? "nil") to \(status.rawValue)")
+                    // Update local state to hide RSVP buttons
+                    userRSVPStatus = status
+                    print("🔧 DEBUG: userRSVPStatus updated to: \(userRSVPStatus?.rawValue ?? "nil")")
+                }
             }
         }
     }

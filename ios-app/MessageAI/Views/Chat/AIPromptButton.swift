@@ -71,18 +71,29 @@ struct AIPromptButton: View {
 }
 
 /// Container for AI prompts that appear below message bubbles
-/// Shows highest priority detection only (Event > Reminder > Decision)
+/// Shows highest priority detection only (Invitation > Event > Reminder > Decision)
 /// Compact version that sits next to timestamp
 struct AIPromptContainerCompact: View {
     let analysis: MessageAnalysisResponse
     let onAddEvent: (CalendarDetection) -> Void
     let onAddReminder: (ReminderDetection) -> Void
     let onSaveDecision: (DecisionDetection) -> Void
+    let onCreateInvitation: (InvitationDetection) -> Void
     
     var body: some View {
         HStack(spacing: 6) {
-            // Priority 1: Calendar event (Story 5.1)
-            if analysis.calendar.detected {
+            // Priority 1: Invitation (Story 5.4)
+            if analysis.invitation.detected {
+                AIPromptButtonCompact(
+                    icon: "party.popper.fill",
+                    text: "Create event & invite",
+                    tintColor: .purple
+                ) {
+                    onCreateInvitation(analysis.invitation)
+                }
+            }
+            // Priority 2: Calendar event (Story 5.1) - only if no invitation
+            else if analysis.calendar.detected {
                 AIPromptButtonCompact(
                     icon: "calendar.badge.plus",
                     text: "Add to calendar",
@@ -91,7 +102,7 @@ struct AIPromptContainerCompact: View {
                     onAddEvent(analysis.calendar)
                 }
             }
-            // Priority 2: Reminder (Story 5.5) - only if no event
+            // Priority 3: Reminder (Story 5.5) - only if no invitation or event
             else if analysis.reminder.detected {
                 AIPromptButtonCompact(
                     icon: "bell.badge.fill",
@@ -101,7 +112,7 @@ struct AIPromptContainerCompact: View {
                     onAddReminder(analysis.reminder)
                 }
             }
-            // Priority 3: Decision (Story 5.2) - only if no event or reminder
+            // Priority 4: Decision (Story 5.2) - only if no invitation, event, or reminder
             else if analysis.decision.detected {
                 AIPromptButtonCompact(
                     icon: "checkmark.circle.fill",
@@ -157,17 +168,28 @@ struct AIPromptContainerCompact: View {
 }
 
 /// Container for AI prompts that appear below message bubbles
-/// Shows highest priority detection only (Event > Reminder > Decision)
+/// Shows highest priority detection only (Invitation > Event > Reminder > Decision)
 struct AIPromptContainer: View {
     let analysis: MessageAnalysisResponse
     let onAddEvent: (CalendarDetection) -> Void
     let onAddReminder: (ReminderDetection) -> Void
     let onSaveDecision: (DecisionDetection) -> Void
+    let onCreateInvitation: (InvitationDetection) -> Void
     
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Priority 1: Calendar event (Story 5.1)
-            if analysis.calendar.detected {
+            // Priority 1: Invitation (Story 5.4)
+            if analysis.invitation.detected {
+                AIPromptButton(
+                    icon: "party.popper.fill",
+                    text: "🎉 Create event & invite?",
+                    tintColor: .purple
+                ) {
+                    onCreateInvitation(analysis.invitation)
+                }
+            }
+            // Priority 2: Calendar event (Story 5.1) - only if no invitation
+            else if analysis.calendar.detected {
                 AIPromptButton(
                     icon: "calendar.badge.plus",
                     text: "Add to calendar?",
@@ -176,7 +198,7 @@ struct AIPromptContainer: View {
                     onAddEvent(analysis.calendar)
                 }
             }
-            // Priority 2: Reminder (Story 5.5) - only if no event
+            // Priority 3: Reminder (Story 5.5) - only if no invitation or event
             else if analysis.reminder.detected {
                 AIPromptButton(
                     icon: "bell.badge.fill",
@@ -186,7 +208,7 @@ struct AIPromptContainer: View {
                     onAddReminder(analysis.reminder)
                 }
             }
-            // Priority 3: Decision (Story 5.2) - only if no event or reminder
+            // Priority 4: Decision (Story 5.2) - only if no invitation, event, or reminder
             else if analysis.decision.detected {
                 AIPromptButton(
                     icon: "checkmark.circle.fill",

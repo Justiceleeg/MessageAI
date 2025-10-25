@@ -331,6 +331,7 @@ struct MessageAnalysisResponse: Codable {
     let reminder: ReminderDetection
     let decision: DecisionDetection
     let rsvp: RSVPDetection
+    let invitation: InvitationDetection
     let priority: PriorityDetection
     let conflict: ConflictDetection
 }
@@ -362,6 +363,14 @@ struct RSVPDetection: Codable {
     let detected: Bool
     let status: String?  // "accepted" or "declined"
     let eventReference: String?
+}
+
+/// Invitation detection (Story 5.4)
+struct InvitationDetection: Codable {
+    let detected: Bool
+    let type: String?  // "create"
+    let eventTitle: String?
+    let invitationDetected: Bool
 }
 
 /// Priority detection

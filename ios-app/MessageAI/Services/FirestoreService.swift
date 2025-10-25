@@ -357,6 +357,14 @@ class FirestoreService: ObservableObject {
                 priority = Priority(rawValue: priorityString)
             }
             
+            // Parse metadata field (Story 5.4)
+            var metadata: MessageMetadata? = nil
+            if let metadataData = doc.data()["metadata"] as? [String: Any] {
+                let isInvitation = metadataData["isInvitation"] as? Bool
+                let eventId = metadataData["eventId"] as? String
+                metadata = MessageMetadata(isInvitation: isInvitation, eventId: eventId)
+            }
+            
             return Message(
                 id: messageId,
                 messageId: messageId,
@@ -365,7 +373,8 @@ class FirestoreService: ObservableObject {
                 timestamp: timestamp,
                 status: status,
                 readBy: readBy,
-                priority: priority
+                priority: priority,
+                metadata: metadata
             )
         }
         
@@ -424,6 +433,14 @@ class FirestoreService: ObservableObject {
                         if let priorityString = doc.data()["priority"] as? String {
                             priority = Priority(rawValue: priorityString)
                         }
+                        
+                        // Parse metadata field (Story 5.4)
+                        var metadata: MessageMetadata? = nil
+                        if let metadataData = doc.data()["metadata"] as? [String: Any] {
+                            let isInvitation = metadataData["isInvitation"] as? Bool
+                            let eventId = metadataData["eventId"] as? String
+                            metadata = MessageMetadata(isInvitation: isInvitation, eventId: eventId)
+                        }
 
                         return Message(
                             id: messageId,
@@ -433,7 +450,8 @@ class FirestoreService: ObservableObject {
                             timestamp: timestamp,
                             status: status,
                             readBy: readBy,
-                            priority: priority
+                            priority: priority,
+                            metadata: metadata
                         )
                     }
 

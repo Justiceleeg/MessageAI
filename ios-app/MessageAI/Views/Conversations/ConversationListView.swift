@@ -172,8 +172,10 @@ struct ConversationListView: View {
             }
             .sheet(isPresented: $showCalendar) {
                 // Calendar View (Story 5.1.5)
-                CalendarView()
-                    .environmentObject(authViewModel)
+                NavigationStack {
+                    CalendarView()
+                        .environmentObject(authViewModel)
+                }
             }
             .alert("Error", isPresented: .constant(viewModel.errorMessage != nil)) {
                 Button("OK") {

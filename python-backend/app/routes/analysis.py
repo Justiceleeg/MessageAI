@@ -4,7 +4,7 @@ Handles comprehensive message analysis including event detection, reminders, dec
 """
 from fastapi import APIRouter, HTTPException
 from app.models.requests import MessageAnalysisRequest
-from app.models.responses import MessageAnalysisResponse, CalendarDetection, ReminderDetection, DecisionDetection, RSVPDetection, PriorityDetection, ConflictDetection
+from app.models.responses import MessageAnalysisResponse, CalendarDetection, ReminderDetection, DecisionDetection, RSVPDetection, InvitationDetection, PriorityDetection, ConflictDetection
 from app.services.openai_service import get_openai_service
 from app.services.vector_store import get_vector_store
 
@@ -86,6 +86,12 @@ async def analyze_message(request: MessageAnalysisRequest):
                 detected=analysis["rsvp"]["detected"],
                 status=analysis["rsvp"]["status"],
                 event_reference=analysis["rsvp"]["event_reference"]
+            ),
+            invitation=InvitationDetection(
+                detected=analysis["invitation"]["detected"],
+                type=analysis["invitation"]["type"],
+                eventTitle=analysis["invitation"]["eventTitle"],
+                invitationDetected=analysis["invitation"]["invitationDetected"]
             ),
             priority=PriorityDetection(
                 detected=analysis["priority"]["detected"],

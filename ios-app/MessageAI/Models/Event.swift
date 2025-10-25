@@ -45,6 +45,30 @@ struct Event: Identifiable, Codable, Hashable {
         case attendees
     }
     
+    // MARK: - Custom Encoding
+    
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        
+        try container.encode(eventId, forKey: .eventId)
+        try container.encode(title, forKey: .title)
+        try container.encode(date, forKey: .date)
+        try container.encode(creatorUserId, forKey: .creatorUserId)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(createdInConversationId, forKey: .createdInConversationId)
+        try container.encode(createdAtMessageId, forKey: .createdAtMessageId)
+        try container.encode(invitations, forKey: .invitations)
+        try container.encode(attendees, forKey: .attendees)
+        
+        // Only encode optional fields if they have values
+        if let time = time, !time.isEmpty {
+            try container.encode(time, forKey: .time)
+        }
+        if let location = location, !location.isEmpty {
+            try container.encode(location, forKey: .location)
+        }
+    }
+    
     // MARK: - Initialization
     
     init(
@@ -80,6 +104,13 @@ struct Event: Identifiable, Codable, Hashable {
 struct Invitation: Codable, Hashable {
     let messageId: String
     let invitedUserIds: [String]
+    let timestamp: Date
+    
+    init(messageId: String, invitedUserIds: [String], timestamp: Date = Date()) {
+        self.messageId = messageId
+        self.invitedUserIds = invitedUserIds
+        self.timestamp = timestamp
+    }
 }
 
 /// Attendee information with RSVP status

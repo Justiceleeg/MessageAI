@@ -31,6 +31,7 @@ struct ChatView: View {
     @StateObject private var viewModel: ChatViewModel
     @Environment(\.dismiss) private var dismiss
     @Environment(NotificationManager.self) private var notificationManager
+    @EnvironmentObject private var authViewModel: AuthViewModel
     
     // State for retry action sheet
     @State private var showRetryActionSheet = false
@@ -43,6 +44,10 @@ struct ChatView: View {
     
     @State private var showDecisionConfirmationModal = false
     @State private var selectedDecisionData: DecisionDetection?
+    
+    // State for invitation features (Story 5.4)
+    @State private var showEventInvitationModal = false
+    @State private var selectedInvitationData: InvitationDetection?
     
     @State private var showPerChatDecisions = false  // NEW - Story 5.2 AC5
     @State private var showCalendar = false  // NEW - Story 5.1.5
@@ -207,6 +212,22 @@ struct ChatView: View {
                 }
             }
         }
+        .sheet(isPresented: $showEventInvitationModal) {
+            if let invitationData = selectedInvitationData,
+               let messageId = selectedMessageId,
+               let conversationId = conversationId,
+               let analysis = viewModel.aiSuggestions[messageId] {
+                EventInvitationModal(
+                    analysis: analysis,
+                    messageId: messageId,
+                    conversationId: conversationId
+                ) { event in
+                    // Event created with invitations successfully - dismiss AI prompt
+                    viewModel.dismissAISuggestion(for: messageId)
+                    print("Event created with invitations: \(event.title)")
+                }
+            }
+        }
         .sheet(isPresented: $showPerChatDecisions) {
             // Per-Chat Decisions View (Story 5.2 AC5)
             if let conversationId = conversationId {
@@ -220,6 +241,7 @@ struct ChatView: View {
             // Filter to show only events/reminders from this conversation
             NavigationStack {
                 CalendarView(conversationId: conversationId)
+                    .environmentObject(authViewModel)
             }
         }
     }
@@ -272,7 +294,8 @@ struct ChatView: View {
                                         isOnline: isOnline,
                                         readCount: readCount,
                                         shouldShowReadReceipt: shouldShowReadReceipt,
-                                        isHighlighted: isHighlighted
+                                        isHighlighted: isHighlighted,
+                                        conversationId: conversationId
                                     ) {
                                         // AI Prompt (Story 5.1) - Inline with timestamp
                                         // Only show if not dismissed
@@ -280,7 +303,17 @@ struct ChatView: View {
                                            let analysis = viewModel.aiSuggestions[message.messageId],
                                            !viewModel.dismissedAISuggestions.contains(message.messageId) {
                                             Group {
-                                                if analysis.calendar.detected {
+                                                if analysis.invitation.detected {
+                                                    AIPromptButtonCompact(
+                                                        icon: "party.popper.fill",
+                                                        text: "Create event & invite",
+                                                        tintColor: .purple
+                                                    ) {
+                                                        selectedInvitationData = analysis.invitation
+                                                        selectedMessageId = message.messageId
+                                                        showEventInvitationModal = true
+                                                    }
+                                                } else if analysis.calendar.detected {
                                                     AIPromptButtonCompact(
                                                         icon: "calendar.badge.plus",
                                                         text: "Add to calendar",
@@ -330,14 +363,18 @@ struct ChatView: View {
                         // Auto-scroll to bottom when new message arrives
                         if let lastMessage = newMessages.last {
                             withAnimation(.easeOut(duration: 0.3)) {
-                                scrollProxy.scrollTo(lastMessage.id, anchor: .top)
+                                scrollProxy.scrollTo(lastMessage.id, anchor: .bottom)
                             }
                         }
                     }
                     .onAppear {
-                        // Scroll to bottom on initial load
-                        if let lastMessage = viewModel.messages.last {
-                            scrollProxy.scrollTo(lastMessage.id, anchor: .top)
+                        // Scroll to bottom on initial load with delay to account for RSVP button loading
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            if let lastMessage = viewModel.messages.last {
+                                withAnimation(.easeOut(duration: 0.3)) {
+                                    scrollProxy.scrollTo(lastMessage.id, anchor: .bottom)
+                                }
+                            }
                         }
                         
                         // Handle message highlighting (Story 5.1.6)

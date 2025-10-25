@@ -50,6 +50,11 @@ struct EventDetailView: View {
                     // Attendees
                     attendeesSection
                     
+                    // Linked to Chats (Story 5.4) - only show for multi-chat events
+                    if event.invitations.count > 1 {
+                        linkedChatsSection
+                    }
+                    
                     // Conversation
                     conversationSection
                     
@@ -156,6 +161,24 @@ struct EventDetailView: View {
         }
     }
     
+    private var linkedChatsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Linked to Chats", systemImage: "bubble.left.and.bubble.right.fill")
+                .font(.caption)
+                .foregroundColor(.secondary)
+            
+            ForEach(Array(event.invitations.keys), id: \.self) { conversationId in
+                if let invitation = event.invitations[conversationId] {
+                    LinkedChatRowView(
+                        conversationId: conversationId,
+                        invitation: invitation,
+                        attendeeNames: attendeeNames
+                    )
+                }
+            }
+        }
+    }
+    
     private var conversationSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Label("Conversation", systemImage: "bubble.left.and.bubble.right")
@@ -168,16 +191,18 @@ struct EventDetailView: View {
     
     private var actionsSection: some View {
         VStack(spacing: 12) {
-            // Jump to Message button
-            Button {
-                navigateToMessage()
-            } label: {
-                Label("Jump to Message", systemImage: "arrow.right.circle.fill")
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color.blue)
-                    .foregroundColor(.white)
-                    .cornerRadius(12)
+            // Jump to Message button - only show for single-chat events
+            if event.invitations.count <= 1 {
+                Button {
+                    navigateToMessage()
+                } label: {
+                    Label("Jump to Message", systemImage: "arrow.right.circle.fill")
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(12)
+                }
             }
             
             // Delete button
@@ -344,6 +369,104 @@ struct AttendeeRowView: View {
             .background(statusColor.opacity(0.2))
             .foregroundColor(statusColor)
             .cornerRadius(8)
+    }
+}
+
+// MARK: - LinkedChatRowView
+
+struct LinkedChatRowView: View {
+    let conversationId: String
+    let invitation: Invitation
+    let attendeeNames: [String: String]
+    
+    @State private var conversationName: String = "Loading..."
+    @State private var shouldNavigateToChat = false
+    
+    private let firestoreService = FirestoreService()
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(conversationName)
+                        .font(.body)
+                        .fontWeight(.medium)
+                    
+                    Text("\(invitation.invitedUserIds.count) invited")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                
+                Spacer()
+                
+                Button("Jump to Chat") {
+                    shouldNavigateToChat = true
+                }
+                .font(.caption)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Color.blue)
+                .foregroundColor(.white)
+                .cornerRadius(8)
+            }
+            
+            // Show attendee status for this chat
+            if !invitation.invitedUserIds.isEmpty {
+                HStack(spacing: 8) {
+                    ForEach(invitation.invitedUserIds.prefix(3), id: \.self) { userId in
+                        if let name = attendeeNames[userId] {
+                            Text(name)
+                                .font(.caption)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color(.systemGray5))
+                                .cornerRadius(6)
+                        }
+                    }
+                    
+                    if invitation.invitedUserIds.count > 3 {
+                        Text("+\(invitation.invitedUserIds.count - 3) more")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .background(Color(.systemGray6))
+        .cornerRadius(8)
+        .task {
+            await loadConversationName()
+        }
+        .onTapGesture {
+            shouldNavigateToChat = true
+        }
+        .sheet(isPresented: $shouldNavigateToChat) {
+            // Navigate to chat view
+            NavigationStack {
+                ChatView(conversationId: conversationId, otherUserId: "")
+            }
+        }
+    }
+    
+    private func loadConversationName() async {
+        do {
+            let conversation = try await firestoreService.getConversation(conversationId: conversationId)
+            if conversation.isGroupChat {
+                conversationName = conversation.groupName ?? "Group Chat"
+            } else {
+                // For 1:1 chats, get the other participant's name
+                let otherUserId = conversation.participants.first { $0 != AuthService.shared.currentUser?.userId }
+                if let otherUserId = otherUserId, let name = attendeeNames[otherUserId] {
+                    conversationName = name
+                } else {
+                    conversationName = "Chat"
+                }
+            }
+        } catch {
+            conversationName = "Unknown Chat"
+        }
     }
 }
 

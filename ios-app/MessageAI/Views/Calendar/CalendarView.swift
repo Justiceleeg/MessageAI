@@ -165,7 +165,8 @@ struct CalendarView: View {
     private func loadInitialData(userId: String) {
         Task {
             do {
-                async let eventsTask = eventService.listEvents(userId: userId)
+                // Use listAllUserEvents to get both created and attended events (Story 5.4)
+                async let eventsTask = eventService.listAllUserEvents(userId: userId)
                 async let remindersTask = reminderService.listReminders(userId: userId)
                 
                 let allEvents = try await eventsTask
@@ -193,7 +194,8 @@ struct CalendarView: View {
         removeListeners()
         
         // Set up real-time listeners
-        eventListener = eventService.observeUserEvents(userId: userId) { updatedEvents in
+        // Use observeAllUserEvents to get both created and attended events (Story 5.4)
+        eventListener = eventService.observeAllUserEvents(userId: userId) { updatedEvents in
             // Filter by conversationId if provided
             if let conversationId = conversationId {
                 events = updatedEvents.filter { $0.createdInConversationId == conversationId }
@@ -222,11 +224,17 @@ struct CalendarView: View {
     // MARK: - Actions
     
     private func deleteEvent(_ event: Event) {
+        print("🗑️ DEBUG: Starting event deletion for: \(event.eventId)")
         Task {
             do {
+                print("🗑️ DEBUG: Calling eventService.deleteEvent")
                 try await eventService.deleteEvent(id: event.eventId)
+                print("✅ DEBUG: Event deleted successfully")
                 selectedEvent = nil
+                print("✅ DEBUG: selectedEvent set to nil")
             } catch {
+                print("❌ DEBUG: Failed to delete event: \(error.localizedDescription)")
+                print("❌ DEBUG: Full error: \(error)")
                 errorMessage = "Failed to delete event: \(error.localizedDescription)"
             }
         }

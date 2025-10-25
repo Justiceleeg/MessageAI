@@ -30,20 +30,22 @@ async def create_event(request: EventCreateRequest):
         query = f"{request.title} {request.date}"
         
         # Search for similar events using vector similarity
+        # Check for similar events by the same creator (for multi-chat linking)
         similar_events = vector_store.search_similar_events(
             query=query,
             k=3,
-            filter_dict={"user_id": request.user_id}  # Only user's own events
+            filter_dict={"user_id": request.user_id}  # Only same creator's events
         )
         
-        # Check for high similarity (deduplication threshold)
-        SIMILARITY_THRESHOLD = 0.85
+        # Check for high similarity (multi-chat linking threshold)
+        # Lower threshold for multi-chat linking since events might be worded differently
+        SIMILARITY_THRESHOLD = 0.75
         for event in similar_events:
             similarity = event.get("similarity", 0.0)
             # Note: Pinecone similarity_search_with_score returns values where higher is MORE similar
             # We need to check if it's above threshold
             if similarity >= SIMILARITY_THRESHOLD:
-                # Found potential duplicate
+                # Found potential duplicate - suggest linking to existing event
                 return EventCreateResponse(
                     success=False,
                     event_id=None,
@@ -65,18 +67,25 @@ async def create_event(request: EventCreateRequest):
             "event_id": event_id,
             "title": request.title,
             "date": request.date,
-            "time": request.time,
-            "location": request.location,
             "user_id": request.user_id,
             "conversation_id": request.conversation_id,
             "message_id": request.message_id
         }
+        
+        # Only add optional fields if they have values
+        if request.time is not None:
+            event_metadata["time"] = request.time
+        if request.location is not None:
+            event_metadata["location"] = request.location
         
         vector_store.add_event(
             event_id=event_id,
             text=query,
             metadata=event_metadata
         )
+        
+        # Note: Message metadata update is handled by the iOS client
+        # The client will update the message with invitation metadata after event creation
         
         return EventCreateResponse(
             success=True,
@@ -127,6 +136,32 @@ async def search_events(request: EventSearchRequest):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to search events: {str(e)}")
+
+
+@router.post("/events/link")
+async def link_event_to_chat(event_id: str, conversation_id: str, user_id: str):
+    """
+    Link an existing event to a new chat conversation.
+    Used for multi-chat event linking (Story 5.4).
+    """
+    try:
+        # This endpoint would typically update Firestore to add the conversation
+        # to the event's invitations map, but since this is a backend-only service,
+        # the actual Firestore update will be handled by the iOS client.
+        
+        # For now, return success - the iOS client will handle the Firestore update
+        return {
+            "success": True,
+            "event_id": event_id,
+            "conversation_id": conversation_id,
+            "message": "Event linking request processed. iOS client will update Firestore."
+        }
+        
+    except Exception as e:
+        print(f"Error linking event: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to link event: {str(e)}")
 
 
 @router.post("/events/detect")

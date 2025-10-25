@@ -5,6 +5,7 @@ xcuserdata/
 # Firebase Security Rules (keep private)
 firebase/firestore.rules
 firebase/database.rules.json
+firebase/firestore.indexes.json
 
 # Note: GoogleService-Info.plist contains Firebase API key
 # This is intentionally committed for the next 5 days while repo is public

@@ -256,7 +256,15 @@ Detect ALL of the following (return JSON):
    - status: "accepted" or "declined" (null if not detected)
    - event_reference: what event they're responding to (null if not clear)
 
-5. **priority**: Detect urgency/priority (Story 5.3)
+5. **invitation**: Detect event invitations (Story 5.4)
+   - detected: true/false
+   - type: "create" (invitation being sent)
+   - eventTitle: brief event title (null if not detected)
+   - invitationDetected: true/false
+   - CRITICAL: Look for invitation language like "party at my place", "come to", "join us for", "you're invited", "everyone's welcome"
+   - Must distinguish from personal events (no invitation language)
+
+6. **priority**: Detect urgency/priority (Story 5.3)
    - detected: true/false
    - level: "low", "medium", or "high" (null if not detected)
    - reason: brief explanation of why this priority was assigned
@@ -264,7 +272,7 @@ Detect ALL of the following (return JSON):
    - MEDIUM priority indicators: "important", "need", "can you", direct questions requiring response, "FYI" with action item
    - LOW priority: normal conversation, no urgency indicators
 
-6. **conflict**: Detect schedule conflicts (check against user_calendar)
+7. **conflict**: Detect schedule conflicts (check against user_calendar)
    - detected: true/false
    - conflicting_events: [] (list of event titles that conflict)
 
@@ -274,6 +282,7 @@ Return ONLY valid JSON in this exact structure:
   "reminder": {{"detected": false, "title": null, "date_expression": null}},
   "decision": {{"detected": false, "text": null}},
   "rsvp": {{"detected": false, "status": null, "event_reference": null}},
+  "invitation": {{"detected": false, "type": null, "eventTitle": null, "invitationDetected": false}},
   "priority": {{"detected": false, "level": null, "reason": null}},
   "conflict": {{"detected": false, "conflicting_events": []}}
 }}"""
@@ -295,6 +304,7 @@ Return ONLY valid JSON in this exact structure:
                 "reminder": {"detected": False, "title": None, "date_expression": None},
                 "decision": {"detected": False, "text": None},
                 "rsvp": {"detected": False, "status": None, "event_reference": None},
+                "invitation": {"detected": False, "type": None, "eventTitle": None, "invitationDetected": False},
                 "priority": {"detected": False, "level": None, "reason": None},
                 "conflict": {"detected": False, "conflicting_events": []}
             }
@@ -320,6 +330,7 @@ Return ONLY valid JSON in this exact structure:
                 "reminder": {"detected": False, "title": None, "date_expression": None},
                 "decision": {"detected": False, "text": None},
                 "rsvp": {"detected": False, "status": None, "event_reference": None},
+                "invitation": {"detected": False, "type": None, "eventTitle": None, "invitationDetected": False},
                 "priority": {"detected": False, "level": None, "reason": None},
                 "conflict": {"detected": False, "conflicting_events": []}
             }

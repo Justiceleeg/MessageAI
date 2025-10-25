@@ -13,6 +13,17 @@ enum Priority: String, Codable {
     case high
 }
 
+/// Message metadata for special message types (Story 5.4)
+struct MessageMetadata: Codable, Equatable {
+    let isInvitation: Bool?
+    let eventId: String?
+    
+    init(isInvitation: Bool? = nil, eventId: String? = nil) {
+        self.isInvitation = isInvitation
+        self.eventId = eventId
+    }
+}
+
 /// Represents a message in a 1:1 or group conversation
 /// 
 /// Status Values:
@@ -29,6 +40,7 @@ struct Message: Identifiable, Codable, Equatable {
     var status: String  // "sending", "sent", "delivered", "read"
     var readBy: [String]  // Array of userIds who have read this message
     var priority: Priority?  // NEW: Priority level for urgent messages (Story 5.3)
+    var metadata: MessageMetadata?  // NEW: Message metadata for special types (Story 5.4)
     
     /// Helper to determine if message was sent by current user for UI layout
     func isSentByCurrentUser(currentUserId: String) -> Bool {
@@ -44,9 +56,10 @@ struct Message: Identifiable, Codable, Equatable {
         case status
         case readBy
         case priority
+        case metadata
     }
     
-    init(id: String, messageId: String, senderId: String, text: String, timestamp: Date, status: String = "sending", readBy: [String] = [], priority: Priority? = nil) {
+    init(id: String, messageId: String, senderId: String, text: String, timestamp: Date, status: String = "sending", readBy: [String] = [], priority: Priority? = nil, metadata: MessageMetadata? = nil) {
         self.id = id
         self.messageId = messageId
         self.senderId = senderId
@@ -55,6 +68,7 @@ struct Message: Identifiable, Codable, Equatable {
         self.status = status
         self.readBy = readBy
         self.priority = priority
+        self.metadata = metadata
     }
     
     /// Initialize from Firestore decoder
@@ -69,6 +83,7 @@ struct Message: Identifiable, Codable, Equatable {
         self.status = try container.decode(String.self, forKey: .status)
         self.readBy = try container.decodeIfPresent([String].self, forKey: .readBy) ?? []
         self.priority = try container.decodeIfPresent(Priority.self, forKey: .priority)
+        self.metadata = try container.decodeIfPresent(MessageMetadata.self, forKey: .metadata)
     }
 }
 

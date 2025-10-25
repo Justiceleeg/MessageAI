@@ -203,6 +203,14 @@ class RSVPDetection(BaseModel):
     event_reference: Optional[str] = Field(None, description="Referenced event title/date")
 
 
+class InvitationDetection(BaseModel):
+    """Invitation detection result (Story 5.4)"""
+    detected: bool = Field(..., description="Whether an invitation was detected")
+    type: Optional[str] = Field(None, description="Invitation type (create)")
+    eventTitle: Optional[str] = Field(None, description="Event title for invitation")
+    invitationDetected: bool = Field(False, description="Whether invitation language was detected")
+
+
 class PriorityDetection(BaseModel):
     """Priority/urgency detection result"""
     detected: bool = Field(..., description="Whether priority was detected")
@@ -223,6 +231,7 @@ class MessageAnalysisResponse(BaseModel):
     reminder: ReminderDetection
     decision: DecisionDetection
     rsvp: RSVPDetection
+    invitation: InvitationDetection
     priority: PriorityDetection
     conflict: ConflictDetection
     
@@ -240,6 +249,7 @@ class MessageAnalysisResponse(BaseModel):
                 "reminder": {"detected": False},
                 "decision": {"detected": False},
                 "rsvp": {"detected": False},
+                "invitation": {"detected": False, "type": None, "eventTitle": None, "invitationDetected": False},
                 "priority": {"detected": False},
                 "conflict": {"detected": False, "conflicting_events": []}
             }
