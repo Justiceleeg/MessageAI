@@ -576,12 +576,10 @@ struct ChatView: View {
                         }
                     }
                     .onAppear {
-                        // Scroll to bottom on initial load with delay to account for RSVP button loading
+                        // Scroll to bottom on initial load instantly (no animation for snappier UX)
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                             if let lastMessage = viewModel.messages.last {
-                                withAnimation(.easeOut(duration: 0.3)) {
-                                    scrollProxy.scrollTo(lastMessage.id, anchor: .bottom)
-                                }
+                                scrollProxy.scrollTo(lastMessage.id, anchor: .bottom)
                             }
                         }
                         

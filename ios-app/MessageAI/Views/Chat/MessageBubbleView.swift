@@ -24,11 +24,29 @@ struct MessageBubbleView<AIPrompt: View>: View {
     let conversationId: String?  // Conversation ID for RSVP actions (Story 5.4)
     
     // RSVP Modal State
-    @State private var showRSVPModal = false
-    @State private var selectedRSVPStatus: RSVPStatus = .accepted
+    @State private var rsvpModalState: RSVPModalState = .hidden
     @State private var userRSVPStatus: RSVPStatus? = nil
     @State private var eventDate: Date? = nil
     @State private var isLoadingEventData = true
+    
+    // Enum to track which RSVP modal to show
+    private enum RSVPModalState {
+        case hidden
+        case accept
+        case decline
+        
+        var isPresented: Bool {
+            self != .hidden
+        }
+        
+        var status: RSVPStatus? {
+            switch self {
+            case .accept: return .accepted
+            case .decline: return .declined
+            case .hidden: return nil
+            }
+        }
+    }
     
     // MARK: - Initialization
     
@@ -63,8 +81,9 @@ struct MessageBubbleView<AIPrompt: View>: View {
     
     // MARK: - Computed Properties
     
+    /// Inline RSVP buttons (compact circular design)
     @ViewBuilder
-    private var rsvpSection: some View {
+    private var inlineRSVPButtons: some View {
         if !isSentByCurrentUser,
            let metadata = message.metadata,
            metadata.isInvitation == true,
@@ -72,21 +91,33 @@ struct MessageBubbleView<AIPrompt: View>: View {
            let conversationId = conversationId,
            shouldShowRSVPButtons {
             
-            RSVPQuickActionsView(
-                eventId: eventId,
-                eventTitle: message.text, // Use message text as event title for now
-                conversationId: conversationId,
-                onAccept: {
-                    selectedRSVPStatus = .accepted
-                    showRSVPModal = true
-                },
-                onDecline: {
-                    selectedRSVPStatus = .declined
-                    showRSVPModal = true
+            HStack(spacing: 8) {
+                // Accept button
+                Button(action: {
+                    rsvpModalState = .accept
+                }) {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(Color.green))
                 }
-            )
-            .padding(.horizontal, 12)
-            .padding(.top, 4)
+                .buttonStyle(.plain)
+                .accessibilityLabel("Accept invitation")
+                
+                // Decline button
+                Button(action: {
+                    rsvpModalState = .decline
+                }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(Color.red))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Decline invitation")
+            }
         }
     }
     
@@ -196,8 +227,8 @@ struct MessageBubbleView<AIPrompt: View>: View {
                 .padding(.leading, 12)
             }
             
-            // Message bubble
-            HStack {
+            // Message bubble with inline RSVP buttons for received invitations
+            HStack(alignment: .center, spacing: 8) {
                 if isSentByCurrentUser {
                     Spacer(minLength: 60)
                 }
@@ -218,14 +249,15 @@ struct MessageBubbleView<AIPrompt: View>: View {
                     )
                     .fixedSize(horizontal: false, vertical: true)
                 
+                // Inline RSVP buttons (Story 5.4) - right after message bubble for received invitations
                 if !isSentByCurrentUser {
-                    Spacer(minLength: 60)
+                    inlineRSVPButtons
+                }
+                
+                if !isSentByCurrentUser {
+                    Spacer(minLength: 8)  // Reduced from 60 to allow more room for message + buttons
                 }
             }
-            
-            // RSVP Quick Actions (Story 5.4) - for invitation messages
-            
-            rsvpSection
             
             // Timestamp, AI prompt, and status indicator (all on same line)
             HStack(spacing: 4) {
@@ -263,21 +295,31 @@ struct MessageBubbleView<AIPrompt: View>: View {
         .onAppear {
             loadEventData()
         }
-        .sheet(isPresented: $showRSVPModal) {
+        .sheet(isPresented: Binding(
+            get: { rsvpModalState.isPresented },
+            set: { isPresented in
+                if !isPresented {
+                    rsvpModalState = .hidden
+                }
+            }
+        )) {
             if let conversationId = conversationId,
                let metadata = message.metadata,
-               let eventId = metadata.eventId {
+               let eventId = metadata.eventId,
+               let preSelectedStatus = rsvpModalState.status {
                 RSVPModal(
                     eventId: eventId,
                     eventTitle: message.text,
                     conversationId: conversationId,
-                    preSelectedStatus: selectedRSVPStatus
+                    preSelectedStatus: preSelectedStatus
                 ) { status, message in
                     print("🔧 DEBUG: RSVP confirmed: \(status), message: \(message ?? "none")")
                     print("🔧 DEBUG: Updating userRSVPStatus from \(userRSVPStatus?.rawValue ?? "nil") to \(status.rawValue)")
                     // Update local state to hide RSVP buttons
                     userRSVPStatus = status
                     print("🔧 DEBUG: userRSVPStatus updated to: \(userRSVPStatus?.rawValue ?? "nil")")
+                    // Reset modal state
+                    rsvpModalState = .hidden
                 }
             }
         }
