@@ -221,7 +221,19 @@ struct EventsCalendarView: View {
     
     private var eventsForSelectedDate: [Event] {
         eventsForDate(selectedDate)
-            .sorted { $0.date < $1.date }
+            .sorted { event1, event2 in
+                // Sort by start time if both have times, otherwise all-day events go first
+                switch (event1.startTime, event2.startTime) {
+                case let (time1?, time2?):
+                    return time1 < time2
+                case (nil, _?):
+                    return true  // All-day events first
+                case (_?, nil):
+                    return false  // Timed events after all-day
+                case (nil, nil):
+                    return event1.date < event2.date  // Fall back to date
+                }
+            }
     }
     
     private func eventsForDate(_ date: Date) -> [Event] {

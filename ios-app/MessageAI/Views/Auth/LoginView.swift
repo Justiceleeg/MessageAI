@@ -76,7 +76,7 @@ struct LoginView: View {
                     viewModel.clearError()
                 }
             } message: {
-                Text(viewModel.errorMessage ?? "An unknown error occurred.")
+                Text("There was an issue logging in. Please check your credentials and try again.")
             }
             .disabled(viewModel.isLoading)
             .overlay {

@@ -379,6 +379,24 @@ final class ChatViewModel: ObservableObject {
     
     /// Send a message with optimistic UI (handles both new and existing conversations)
     func sendMessage() async {
+        // Prevent multiple concurrent sends
+        guard !isSending else {
+            logger.warning("Send already in progress, ignoring duplicate call")
+            return
+        }
+        
+        // Set sending state to prevent concurrent sends and disable send button
+        await MainActor.run {
+            isSending = true
+        }
+        
+        // Ensure isSending is always reset, even if we return early or throw
+        defer {
+            Task { @MainActor in
+                isSending = false
+            }
+        }
+        
         // Capture and clear message text on main actor
         let text = await MainActor.run { () -> String in
             let trimmedText = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
