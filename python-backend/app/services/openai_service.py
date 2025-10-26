@@ -19,7 +19,7 @@ class OpenAIService:
         self.embedding_model = "text-embedding-3-small"
         self.chat_model = "gpt-3.5-turbo"
         
-        print(f"✅ OpenAIService initialized with model: {self.chat_model}")
+        # OpenAIService initialized successfully
     
     def generate_embedding(self, text: str) -> List[float]:
         """
@@ -186,7 +186,8 @@ Respond with ONLY a JSON array like: ["point1", "point2", "point3"]"""
         text: str,
         message_timestamp: Optional[str] = None,
         user_calendar: Optional[List[Dict[str, Any]]] = None,
-        conversation_context: Optional[List[Dict[str, Any]]] = None
+        conversation_context: Optional[List[Dict[str, Any]]] = None,
+        user_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Comprehensive message analysis detecting events, reminders, decisions, RSVP, priority, and conflicts
@@ -196,6 +197,7 @@ Respond with ONLY a JSON array like: ["point1", "point2", "point3"]"""
             message_timestamp: Optional ISO 8601 timestamp of when the message was sent (for accurate date calculations)
             user_calendar: Optional list of user's existing calendar events for conflict detection
             conversation_context: Optional list of recent messages from conversation for RAG (Story 5.2)
+            user_id: Optional user ID for conflict detection (Story 5.6)
         
         Returns:
             Dictionary with all detection results
@@ -203,15 +205,12 @@ Respond with ONLY a JSON array like: ["point1", "point2", "point3"]"""
         import json
         from datetime import datetime, timedelta
         
-        # Use message timestamp if provided, otherwise use current time
-        if message_timestamp:
-            try:
-                reference_time = datetime.fromisoformat(message_timestamp.replace('Z', '+00:00'))
-            except (ValueError, AttributeError):
-                print(f"⚠️ Invalid timestamp format: {message_timestamp}, using current time")
-                reference_time = datetime.now()
-        else:
-            reference_time = datetime.now()
+        # QUICK FIX: Always use current server time for relative date parsing
+        # This ensures "tomorrow" is calculated from the user's perspective
+        # TODO: Replace with location-based timezone detection
+        reference_time = datetime.now()
+        message_timezone = None
+        print(f"🌍 Using server time as reference: {reference_time.strftime('%Y-%m-%d %H:%M:%S')}")
         
         # Build conversation context if provided (Story 5.2 - Lightweight RAG)
         context_section = ""
@@ -228,14 +227,42 @@ Respond with ONLY a JSON array like: ["point1", "point2", "point3"]"""
         if user_calendar:
             calendar_context = "\n\nUser's existing calendar events:\n"
             for event in user_calendar[:10]:  # Limit to 10 most recent
-                calendar_context += f"- {event.get('title', 'Untitled')} on {event.get('date', 'Unknown')}\n"
+                calendar_context += f"- {event.get('title', 'Untitled')} on {event.get('date', 'Unknown')} from {event.get('startTime', 'Unknown')} to {event.get('endTime', 'Unknown')}\n"
         
         system_prompt = f"""You are an AI assistant that analyzes messages for important information.
 
 IMPORTANT DISTINCTIONS:
-- **Events** are scheduled activities involving other people or social gatherings. Examples: "Dinner Friday at 7pm", "Meeting tomorrow at 2pm", "Party at my place Saturday"
+- **Events** are scheduled activities involving other people or social gatherings. Examples: "Dinner Friday at 7pm", "Meeting tomorrow at 2pm", "Party at my place Saturday", "Arcade tonight at 7pm", "Coffee today at 3pm"
 - **Reminders** are personal tasks or commitments (even with specific times). Examples: "I'll finish the presentation by noon tomorrow", "Send docs by Friday", "Call mom at 3pm", "Submit report by EOD"
+
+CALENDAR EVENT DETECTION RULES:
+1. If message contains a TIME + LOCATION/ACTIVITY → ALWAYS detect as calendar event
+2. If message contains "tonight", "today", "tomorrow" + activity → ALWAYS detect as calendar event  
+3. If message contains "Let's", "We should", "Want to" + time → ALWAYS detect as calendar event
+4. Examples that MUST be detected as calendar events:
+   - "Let's go to the arcade tonight at 7pm" → CALENDAR EVENT
+   - "Arcade today at 7pm" → CALENDAR EVENT  
+   - "Coffee tomorrow morning" → CALENDAR EVENT
+   - "Dinner Friday at 7pm" → CALENDAR EVENT
 - **Decisions** are group agreements with NO time constraints. Example: "Let's go to Italian restaurant"
+
+INVITATION LANGUAGE DETECTION:
+An event contains "invitation language" if it:
+- Uses inclusive language ("Let's", "We should", "Want to", "How about")
+- Suggests participation ("Come to", "Join us", "Meet me", "Go to")
+- Uses question format ("Want to grab coffee?", "Should we meet?")
+- Contains social gathering language ("Party", "Dinner", "Meet up", "Hang out")
+
+Examples of INVITATION language:
+- "Let's go to the store tomorrow at 2pm" → is_invitation=true
+- "Want to grab coffee tomorrow?" → is_invitation=true
+- "Come to my party Friday night" → is_invitation=true
+- "Should we meet for lunch?" → is_invitation=true
+
+Examples of NON-invitation language:
+- "I have a meeting tomorrow at 2pm" → is_invitation=false
+- "The conference is next Tuesday" → is_invitation=false
+- "Doctor appointment at 3pm" → is_invitation=false
 
 {context_section if context_section else f'Analyze this message: "{text}"'}{calendar_context}
 
@@ -247,6 +274,7 @@ Your job is to EXTRACT temporal expressions, NOT calculate dates.
 Examples:
 - "Let's meet tomorrow at 7pm" → extract: date_expression="tomorrow", startTime="19:00", endTime=null
 - "Dinner this Saturday" → extract: date_expression="this Saturday", startTime=null, endTime=null
+- "Arcade tonight at 7pm" → extract: date_expression="today", startTime="19:00", endTime=null
 - "Coffee in 3 days at 2pm" → extract: date_expression="3 days from now", startTime="14:00", endTime=null
 - "Meeting next Monday morning" → extract: date_expression="next Monday", startTime="09:00", endTime=null
 - "Meeting next Tuesday at 3pm" → extract: date_expression="next Tuesday", startTime="15:00", endTime=null
@@ -257,6 +285,8 @@ Examples:
 RELATIVE DATE PARSING (be precise with these):
 - "next Tuesday" → date_expression="next Tuesday" (NOT "this Tuesday")
 - "this Tuesday" → date_expression="this Tuesday" (current week's Tuesday)
+- "tonight" → date_expression="today" (same day, evening time)
+- "this evening" → date_expression="today" (same day, evening time)
 - "next week" → date_expression="next week"
 - "this weekend" → date_expression="this weekend"
 - "next weekend" → date_expression="next weekend"
@@ -285,6 +315,9 @@ TEMPORAL CONTEXT EXTRACTION:
 - **RSVP**: Look for response timing ("I can't make tomorrow's meeting", "I'm in for Friday")
 - **Priority**: Look for urgency deadlines ("need by EOD", "urgent, due tomorrow")
 - **Conflicts**: Look for when conflicts occur ("conflicts with my 3pm meeting")
+- **Calendar Conflicts**: If user_calendar is provided, check for time overlaps with existing events
+- **Same Event Detection**: If event titles are similar (>70%) and times overlap, it's likely the same event
+- **Alternative Suggestions**: If conflicts exist, suggest nearby available times
 
 DO NOT calculate actual dates - just extract the expression and time!
 
@@ -356,12 +389,15 @@ Analyze the message and use the analyze_message function to return structured re
                         },
                         "conflict": {
                             "type": "object",
-                            "description": "Conflict detection",
+                            "description": "Conflict detection with calendar analysis",
                             "properties": {
                                 "detected": {"type": "boolean", "description": "Whether conflicts were detected"},
-                                "conflicting_events": {"type": "array", "items": {"type": "string"}, "description": "List of conflicting event titles"}
+                                "conflicting_events": {"type": "array", "items": {"type": "string"}, "description": "List of conflicting event titles from message"},
+                                "calendar_conflicts": {"type": "array", "items": {"type": "object"}, "description": "Conflicts with user's existing calendar events"},
+                                "alternatives": {"type": "array", "items": {"type": "object"}, "description": "Suggested alternative times"},
+                                "reasoning": {"type": "string", "description": "Brief explanation of conflicts and suggestions"}
                             },
-                            "required": ["detected", "conflicting_events"]
+                            "required": ["detected", "conflicting_events", "calendar_conflicts", "alternatives", "reasoning"]
                         }
                     },
                     "required": ["calendar", "reminder", "decision", "rsvp", "priority", "conflict"]
@@ -389,7 +425,38 @@ Analyze the message and use the analyze_message function to return structured re
                 result = self._ensure_complete_analysis(result)
                 
                 # POST-PROCESS: Parse date expressions using dateparser
-                result = self._parse_date_expressions(result, reference_time)
+                result = self._parse_date_expressions(result, reference_time, message_timezone)
+                
+                # CONFLICT DETECTION: Check for calendar conflicts using Pinecone
+                if result["calendar"]["detected"]:
+                    # Use provided user_id or extract from user_calendar, otherwise use a default
+                    conflict_user_id = user_id or "test_user"  # Use provided user_id first
+                    if not conflict_user_id and user_calendar and len(user_calendar) > 0:
+                        conflict_user_id = user_calendar[0].get("user_id", "test_user")
+                    
+                    # Check for conflicts using Pinecone
+                    conflict_analysis = self._check_calendar_conflicts_pinecone(
+                        {
+                            "title": result["calendar"]["title"],
+                            "date": result["calendar"]["date"],
+                            "startTime": result["calendar"]["startTime"],
+                            "endTime": result["calendar"]["endTime"],
+                            "location": result["calendar"]["location"]
+                        },
+                        conflict_user_id
+                    )
+                    
+                    # Update conflict section with Pinecone results
+                    result["conflict"]["detected"] = conflict_analysis["has_conflicts"]
+                    result["conflict"]["conflicting_events"] = conflict_analysis["conflicts"]  # Fixed key name
+                    result["conflict"]["reasoning"] = conflict_analysis["reasoning"]
+                    result["conflict"]["same_event_detected"] = conflict_analysis["same_event_detected"]
+                    
+                    # Update calendar section with similar events
+                    result["calendar"]["similar_events"] = conflict_analysis.get("similar_events", [])
+                else:
+                    # No calendar event detected, skip conflict detection
+                    pass
                 
                 return result
             else:
@@ -408,7 +475,13 @@ Analyze the message and use the analyze_message function to return structured re
             "decision": {"detected": False, "text": None},
             "rsvp": {"detected": False, "status": None, "event_reference": None},
             "priority": {"detected": False, "level": None, "reason": None},
-            "conflict": {"detected": False, "conflicting_events": []}
+            "conflict": {
+                "detected": False, 
+                "conflicting_events": [],
+                "calendar_conflicts": [],
+                "alternatives": [],
+                "reasoning": ""
+            }
         }
 
     def _ensure_complete_analysis(self, result: Dict[str, Any]) -> Dict[str, Any]:
@@ -489,7 +562,7 @@ Analyze the message and use the analyze_message function to return structured re
         
         return expanded_text
 
-    def _parse_date_expressions(self, result: Dict[str, Any], reference_time) -> Dict[str, Any]:
+    def _parse_date_expressions(self, result: Dict[str, Any], reference_time, message_timezone=None) -> Dict[str, Any]:
         """
         Parse date expressions from AI response into actual ISO dates using dateparser
         Enhanced to handle all detection types with temporal elements
@@ -504,16 +577,53 @@ Analyze the message and use the analyze_message function to return structured re
         import dateparser
         from datetime import timedelta
         
-        # Common dateparser settings
+        # Common dateparser settings with timezone awareness
         dateparser_settings = {
             'RELATIVE_BASE': reference_time,
             'PREFER_DATES_FROM': 'future',  # Always interpret as future dates
             'RETURN_AS_TIMEZONE_AWARE': False
         }
         
+        # Add timezone context if available
+        if message_timezone:
+            # Convert timezone offset to a format dateparser understands
+            try:
+                # Parse timezone offset (e.g., "-07:00" -> -7 hours)
+                if message_timezone.startswith('-'):
+                    tz_hours = -int(message_timezone[1:3])
+                    tz_mins = -int(message_timezone[4:6]) if len(message_timezone) > 4 else 0
+                else:
+                    tz_hours = int(message_timezone[:2])
+                    tz_mins = int(message_timezone[3:5]) if len(message_timezone) > 3 else 0
+                
+                # Create timezone-aware reference time
+                from datetime import timezone, timedelta
+                tz_offset = timezone(timedelta(hours=tz_hours, minutes=tz_mins))
+                reference_time_tz = reference_time.replace(tzinfo=tz_offset)
+                
+                # Update settings to use timezone-aware reference
+                dateparser_settings['RELATIVE_BASE'] = reference_time_tz
+                print(f"🌍 Using timezone-aware reference: {reference_time_tz}")
+                
+            except Exception as e:
+                # Failed to parse timezone, use default reference
+                pass
+        
         # Parse calendar date expression with enhanced relative date handling
         if result["calendar"]["detected"] and result["calendar"]["date_expression"]:
             date_expr = result["calendar"]["date_expression"]
+            
+            # Manual mapping for common expressions that dateparser might not handle well
+            manual_mappings = {
+                "tonight": "today",
+                "this evening": "today",
+                "this afternoon": "today",
+                "this morning": "today"
+            }
+            
+            # Use manual mapping if available
+            if date_expr.lower() in manual_mappings:
+                date_expr = manual_mappings[date_expr.lower()]
             
             # Enhanced settings for better relative date parsing
             enhanced_settings = dateparser_settings.copy()
@@ -548,10 +658,10 @@ Analyze the message and use the analyze_message function to return structured re
                     try:
                         parsed_date = dateparser.parse(attempt, settings=enhanced_settings)
                         if parsed_date:
-                            print(f"✅ Successfully parsed '{attempt}' → {parsed_date.strftime('%Y-%m-%d (%A)')}")
                             break
                     except Exception as e:
-                        print(f"⚠️ Parsing attempt failed for '{attempt}': {e}")
+                        # Continue to next attempt
+                        pass
                         continue
                 
                 # Final fallback: manual calculation for "next [day]"
@@ -571,19 +681,13 @@ Analyze the message and use the analyze_message function to return structured re
                         
                         next_date = reference_time + timedelta(days=days_ahead)
                         parsed_date = next_date
-                        print(f"✅ Manual fallback: 'next {day_name}' → {parsed_date.strftime('%Y-%m-%d (%A)')}")
                     except Exception as e:
-                        print(f"⚠️ Manual fallback failed: {e}")
+                        # Manual fallback failed
+                        pass
             else:
                 parsed_date = dateparser.parse(date_expr, settings=enhanced_settings)
             
             result["calendar"]["date"] = parsed_date.strftime('%Y-%m-%d') if parsed_date else None
-            
-            # Debug logging for date parsing
-            if parsed_date:
-                print(f"✅ Parsed '{date_expr}' → {parsed_date.strftime('%Y-%m-%d (%A)')}")
-            else:
-                print(f"⚠️ Failed to parse date expression: '{date_expr}'")
         else:
             result["calendar"]["date"] = None
         
@@ -603,9 +707,7 @@ Analyze the message and use the analyze_message function to return structured re
                     end_hour = (start_hour + 1) % 24
                     end_time = f"{end_hour:02d}:{start_minute:02d}"
                     result["calendar"]["endTime"] = end_time
-                    print(f"✅ Applied 1-hour default: {start_time} → {end_time}")
                 except (ValueError, AttributeError) as e:
-                    print(f"⚠️ Failed to apply 1-hour default: {e}")
                     result["calendar"]["endTime"] = None
             else:
                 # Parse end time with fallback
@@ -626,9 +728,7 @@ Analyze the message and use the analyze_message function to return structured re
                     
                     duration = end_minutes - start_minutes
                     result["calendar"]["duration"] = duration
-                    print(f"✅ Calculated duration: {duration} minutes ({start_time} to {end_time})")
                 except (ValueError, AttributeError) as e:
-                    print(f"⚠️ Failed to calculate duration: {e}")
                     result["calendar"]["duration"] = 60  # Default to 1 hour
         else:
             result["calendar"]["duration"] = None
@@ -767,10 +867,74 @@ Analyze the message and use the analyze_message function to return structured re
             if parsed:
                 return parsed.strftime('%H:%M')
         except Exception as e:
-            print(f"⚠️ dateparser failed for '{time_str}': {e}")
+            # dateparser failed, continue with fallback
+            pass
         
-        # Fallback: Return original if can't parse
-        return time_str if time_str else None
+        # Fallback: Handle common vague time expressions
+        if time_str:
+            # Normalize the time string
+            time_lower = time_str.lower().strip()
+            
+            # Handle compound expressions like "in the evening"
+            if 'evening' in time_lower:
+                return '19:00'  # 7pm
+            elif 'morning' in time_lower:
+                return '09:00'  # 9am
+            elif 'afternoon' in time_lower:
+                return '15:00'  # 3pm
+            elif 'night' in time_lower:
+                return '20:00'  # 8pm
+            elif 'late' in time_lower:
+                return '22:00'  # 10pm
+            elif 'early' in time_lower:
+                return '08:00'  # 8am
+            elif 'noon' in time_lower:
+                return '12:00'  # 12pm
+            elif 'midnight' in time_lower:
+                return '00:00'  # 12am
+            
+            # Simple mappings
+            vague_times = {
+                'evening': '19:00',
+                'morning': '09:00',
+                'afternoon': '15:00',
+                'night': '20:00',
+                'late': '22:00',
+                'early': '08:00',
+                'noon': '12:00',
+                'midnight': '00:00'
+            }
+            return vague_times.get(time_lower, time_str)
+        
+        return None
+    
+    def _check_calendar_conflicts_pinecone(self, detected_event: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+        """
+        Check for calendar conflicts using Pinecone
+        
+        Args:
+            detected_event: Event detected by AI analysis
+            user_id: User ID to search within
+            
+        Returns:
+            Dictionary with conflict analysis
+        """
+        try:
+            from app.services.event_indexing_service import get_event_indexing_service
+            
+            event_service = get_event_indexing_service()
+            result = event_service.search_conflicts(detected_event, user_id)
+            return result
+            
+        except Exception as e:
+            # Log error but don't print traceback in production
+            return {
+                "has_conflicts": False,
+                "conflicts": [],
+                "same_event_detected": False,
+                "similar_events": [],
+                "reasoning": f"Conflict detection unavailable: {str(e)}"
+            }
 
 
 # Singleton instance

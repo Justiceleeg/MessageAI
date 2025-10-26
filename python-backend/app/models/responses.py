@@ -184,6 +184,7 @@ class CalendarDetection(BaseModel):
     duration: Optional[int] = Field(None, description="Event duration in minutes")
     location: Optional[str] = Field(None, description="Event location")
     is_invitation: bool = Field(False, description="Whether this event contains invitation language")
+    similar_events: List[str] = Field(default_factory=list, description="List of similar event IDs (Story 5.6)")
 
 
 class ReminderDetection(BaseModel):
@@ -221,10 +222,23 @@ class PriorityDetection(BaseModel):
     reason: Optional[str] = Field(None, description="Brief explanation of priority assignment")
 
 
+class ConflictEvent(BaseModel):
+    """Individual conflicting event"""
+    id: str = Field(..., description="Event ID")
+    title: str = Field(..., description="Event title")
+    date: Optional[str] = Field(None, description="Event date")
+    startTime: Optional[str] = Field(None, description="Event start time")
+    endTime: Optional[str] = Field(None, description="Event end time")
+    location: Optional[str] = Field(None, description="Event location")
+    similarity_score: Optional[float] = Field(None, description="Semantic similarity score")
+
+
 class ConflictDetection(BaseModel):
     """Schedule conflict detection result"""
     detected: bool = Field(..., description="Whether a conflict was detected")
-    conflicting_events: List[str] = Field(default_factory=list, description="List of conflicting event IDs")
+    conflicting_events: List[ConflictEvent] = Field(default_factory=list, description="List of conflicting events")
+    reasoning: Optional[str] = Field(None, description="Explanation of the conflict analysis")
+    same_event_detected: Optional[bool] = Field(None, description="Whether this appears to be the same event")
 
 
 class MessageAnalysisResponse(BaseModel):

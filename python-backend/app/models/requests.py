@@ -114,7 +114,9 @@ class EventCreateRequest(BaseModel):
     """Request for creating an event with deduplication check"""
     title: str = Field(..., description="Event title")
     date: str = Field(..., description="Event date (ISO 8601)")
-    time: Optional[str] = Field(None, description="Event time (HH:MM format)")
+    startTime: Optional[str] = Field(None, description="Event start time (HH:MM format)")
+    endTime: Optional[str] = Field(None, description="Event end time (HH:MM format)")
+    duration: Optional[int] = Field(None, description="Event duration in minutes")
     location: Optional[str] = Field(None, description="Event location")
     user_id: str = Field(..., description="User creating the event")
     conversation_id: str = Field(..., description="Conversation where event was created")
@@ -125,7 +127,9 @@ class EventCreateRequest(BaseModel):
             "example": {
                 "title": "Coffee meeting",
                 "date": "2025-10-27",
-                "time": "15:00",
+                "startTime": "15:00",
+                "endTime": "16:00",
+                "duration": 60,
                 "location": "Starbucks",
                 "user_id": "user_123",
                 "conversation_id": "conv_456",

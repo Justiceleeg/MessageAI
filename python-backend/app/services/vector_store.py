@@ -59,7 +59,7 @@ class VectorStoreService:
             namespace="reminders"
         )
         
-        print(f"✅ VectorStoreService initialized with index: {self.index_name}")
+        # VectorStoreService initialized successfully
     
     def add_message(
         self, 

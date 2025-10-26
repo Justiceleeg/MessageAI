@@ -4,7 +4,7 @@ Handles comprehensive message analysis including event detection, reminders, dec
 """
 from fastapi import APIRouter, HTTPException
 from app.models.requests import MessageAnalysisRequest
-from app.models.responses import MessageAnalysisResponse, CalendarDetection, ReminderDetection, DecisionDetection, RSVPDetection, PriorityDetection, ConflictDetection
+from app.models.responses import MessageAnalysisResponse, CalendarDetection, ReminderDetection, DecisionDetection, RSVPDetection, PriorityDetection, ConflictDetection, ConflictEvent
 from app.services.openai_service import get_openai_service
 from app.services.vector_store import get_vector_store
 
@@ -34,7 +34,8 @@ async def analyze_message(request: MessageAnalysisRequest):
                 filter_dict={"conversation_id": request.conversation_id}
             )
         except Exception as e:
-            print(f"⚠️ Failed to retrieve context: {e}")
+            # Failed to retrieve context, continue without it
+            pass
             # Continue without context - analysis will still work
         
         # Step 2: Pre-process text to expand time acronyms
@@ -45,7 +46,8 @@ async def analyze_message(request: MessageAnalysisRequest):
             text=expanded_text,  # Use expanded text for better AI understanding
             message_timestamp=request.timestamp,  # Pass message timestamp for date calculations
             user_calendar=request.user_calendar,
-            conversation_context=conversation_context  # RAG context
+            conversation_context=conversation_context,  # RAG context
+            user_id=request.user_id  # Pass user_id for conflict detection (Story 5.6)
         )
         
         # Generate embedding for the message
@@ -77,7 +79,8 @@ async def analyze_message(request: MessageAnalysisRequest):
                 endTime=analysis["calendar"].get("endTime"),
                 duration=analysis["calendar"].get("duration"),
                 location=analysis["calendar"]["location"],
-                is_invitation=analysis["calendar"].get("is_invitation", False)
+                is_invitation=analysis["calendar"].get("is_invitation", False),
+                similar_events=analysis["calendar"].get("similar_events", [])  # Story 5.6
             ),
             reminder=ReminderDetection(
                 detected=analysis["reminder"]["detected"],
@@ -100,7 +103,9 @@ async def analyze_message(request: MessageAnalysisRequest):
             ),
             conflict=ConflictDetection(
                 detected=analysis["conflict"]["detected"],
-                conflicting_events=analysis["conflict"]["conflicting_events"]
+                conflicting_events=analysis["conflict"]["conflicting_events"],  # Use the correct key
+                reasoning=analysis["conflict"].get("reasoning"),
+                same_event_detected=analysis["conflict"].get("same_event_detected")
             )
         )
         

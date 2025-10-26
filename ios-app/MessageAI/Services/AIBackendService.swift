@@ -206,13 +206,10 @@ class AIBackendService {
             messageId: messageId
         )
         
-        print("🔍 AIBackendService: Sending createEvent request")
         do {
             let response: EventCreateResponse = try await post(endpoint: "/api/v1/events/create", body: request)
-            print("🔍 AIBackendService: Received createEvent response: success=\(response.success), eventId=\(response.eventId ?? "nil")")
             return response
         } catch {
-            print("🔍 AIBackendService: createEvent failed: \(error.localizedDescription)")
             throw error
         }
     }
@@ -361,6 +358,93 @@ class AIBackendService {
         
         return try decoder.decode(ReminderVectorResponse.self, from: data)
     }
+    
+    // MARK: - Event Indexing Methods
+    
+    /// Index an event in Pinecone for conflict detection
+    /// - Parameter eventData: Event data dictionary
+    /// - Throws: AIBackendError if request fails
+    func indexEvent(_ eventData: [String: Any]) async throws {
+        let endpoint = "\(baseURL)/api/v1/events/index"
+        guard let url = URL(string: endpoint) else {
+            throw AIBackendError.invalidURL
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: eventData)
+        } catch {
+            throw AIBackendError.encodingError(error)
+        }
+        
+        let (_, response) = try await session.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AIBackendError.invalidResponse
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            throw AIBackendError.serverError(statusCode: httpResponse.statusCode)
+        }
+    }
+    
+    /// Update an indexed event in Pinecone
+    /// - Parameters:
+    ///   - eventId: ID of event to update
+    ///   - eventData: Updated event data dictionary
+    /// - Throws: AIBackendError if request fails
+    func updateEvent(_ eventId: String, _ eventData: [String: Any]) async throws {
+        let endpoint = "\(baseURL)/api/v1/events/\(eventId)/index"
+        guard let url = URL(string: endpoint) else {
+            throw AIBackendError.invalidURL
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: eventData)
+        } catch {
+            throw AIBackendError.encodingError(error)
+        }
+        
+        let (_, response) = try await session.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AIBackendError.invalidResponse
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            throw AIBackendError.serverError(statusCode: httpResponse.statusCode)
+        }
+    }
+    
+    /// Delete an event from Pinecone index
+    /// - Parameter eventId: ID of event to delete
+    /// - Throws: AIBackendError if request fails
+    func deleteEvent(_ eventId: String) async throws {
+        let endpoint = "\(baseURL)/api/v1/events/\(eventId)/index"
+        guard let url = URL(string: endpoint) else {
+            throw AIBackendError.invalidURL
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        
+        let (_, response) = try await session.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AIBackendError.invalidResponse
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            throw AIBackendError.serverError(statusCode: httpResponse.statusCode)
+        }
+    }
 }
 
 // MARK: - Response Models
@@ -478,7 +562,8 @@ struct CalendarDetection: Codable {
     let endTime: String?  // HH:MM (24-hour)
     let duration: Int?  // Duration in minutes
     let location: String?
-    let isInvitation: Bool  // Whether this event contains invitation language
+    let isInvitation: Bool?  // Whether this event contains invitation language (optional with default)
+    let similarEvents: [String]?  // List of similar event IDs (Story 5.6)
     
     enum CodingKeys: String, CodingKey {
         case detected
@@ -489,6 +574,7 @@ struct CalendarDetection: Codable {
         case duration
         case location
         case isInvitation = "is_invitation"
+        case similarEvents = "similar_events"
     }
 }
 
@@ -542,11 +628,36 @@ struct PriorityDetection: Codable {
 /// Conflict detection
 struct ConflictDetection: Codable {
     let detected: Bool
-    let conflictingEvents: [String]
+    let conflictingEvents: [ConflictEvent]
+    let reasoning: String?
+    let sameEventDetected: Bool?
     
     enum CodingKeys: String, CodingKey {
         case detected
         case conflictingEvents = "conflicting_events"
+        case reasoning
+        case sameEventDetected = "same_event_detected"
+    }
+}
+
+/// Individual conflicting event
+struct ConflictEvent: Codable {
+    let id: String
+    let title: String
+    let date: String?
+    let startTime: String?
+    let endTime: String?
+    let location: String?
+    let similarityScore: Double?
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case date
+        case startTime
+        case endTime
+        case location
+        case similarityScore = "similarity_score"
     }
 }
 
@@ -659,8 +770,10 @@ enum AIBackendError: LocalizedError {
     case invalidURL
     case invalidResponse
     case httpError(statusCode: Int)
+    case serverError(statusCode: Int)
     case networkError(Error)
     case decodingError(Error)
+    case encodingError(Error)
     
     var errorDescription: String? {
         switch self {
@@ -670,10 +783,14 @@ enum AIBackendError: LocalizedError {
             return "Invalid response from backend"
         case .httpError(let statusCode):
             return "HTTP error: \(statusCode)"
+        case .serverError(let statusCode):
+            return "Server error: \(statusCode)"
         case .networkError(let error):
             return "Network error: \(error.localizedDescription)"
         case .decodingError(let error):
             return "Failed to decode response: \(error.localizedDescription)"
+        case .encodingError(let error):
+            return "Failed to encode request: \(error.localizedDescription)"
         }
     }
 }

@@ -228,7 +228,7 @@ struct ConversationListView: View {
                     
                     // Check if conversation exists
                     guard viewModel.conversations.contains(where: { $0.conversationId == conversationId }) else {
-                        print("⚠️ ConversationListView: Conversation \(conversationId) not found")
+                        // Conversation not found, continue
                         // Could show an alert here if needed
                         return
                     }

@@ -22,7 +22,14 @@ def test_summarization_route_exists():
 
 def test_events_route_exists():
     """Test that events route is registered"""
-    response = client.post("/api/v1/events/detect")
+    response = client.post("/api/v1/events/index", json={
+        "id": "test-event-123",
+        "user_id": "test-user-123", 
+        "title": "Test Event",
+        "date": "2024-01-19",
+        "startTime": "10:00",
+        "endTime": "11:00"
+    })
     assert response.status_code == 200
 
 

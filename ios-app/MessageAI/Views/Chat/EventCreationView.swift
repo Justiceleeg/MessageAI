@@ -275,11 +275,24 @@ struct EventCreationView: View {
     private static func parseDate(_ dateString: String?) -> Date? {
         guard let dateString = dateString else { return nil }
         
-        // Use DateFormatter with local timezone to avoid UTC interpretation
+        // Parse date components without timezone conversion
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
-        formatter.timeZone = TimeZone.current  // Use local timezone
-        return formatter.date(from: dateString)
+        
+        // Parse the date string to get components
+        guard let parsedDate = formatter.date(from: dateString) else { return nil }
+        
+        // Create a new date with the same calendar date but in local timezone
+        let calendar = Calendar.current
+        let components = calendar.dateComponents([.year, .month, .day], from: parsedDate)
+        
+        // Create date at noon local time to avoid timezone edge cases
+        var localComponents = components
+        localComponents.hour = 12
+        localComponents.minute = 0
+        localComponents.second = 0
+        
+        return calendar.date(from: localComponents)
     }
     
     private static func parseTime(_ timeString: String?) -> Date? {
@@ -338,7 +351,8 @@ struct EventCreationView: View {
             endTime: "16:00",
             duration: 60,
             location: "Starbucks",
-            isInvitation: false
+            isInvitation: false,
+            similarEvents: []
         ),
         messageId: "msg_123",
         conversationId: "conv_456"

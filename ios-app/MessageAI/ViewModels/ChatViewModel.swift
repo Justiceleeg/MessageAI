@@ -1398,9 +1398,12 @@ final class ChatViewModel: ObservableObject {
     /// Analyze message for AI features (Story 5.1)
     /// - Parameter message: The message to analyze
     func analyzeMessageForAI(_ message: Message) {
-        guard let currentUser = authService.currentUser else { return }
-        guard let conversationId = conversationId else { return }
-        
+        guard let currentUser = authService.currentUser else { 
+            return 
+        }
+        guard let conversationId = conversationId else { 
+            return 
+        }
         
         // Run analysis in background task
         Task {
@@ -1420,8 +1423,8 @@ final class ChatViewModel: ObservableObject {
                 }
                 
             } catch {
-                // Silent failure - don't disrupt user experience
-                logger.debug("AI analysis failed for message \(message.messageId): \(error.localizedDescription)")
+                // Log the error for debugging
+                logger.error("AI analysis failed for message \(message.messageId): \(error.localizedDescription)")
             }
         }
     }

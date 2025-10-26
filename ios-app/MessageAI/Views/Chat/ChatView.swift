@@ -51,6 +51,12 @@ struct ChatView: View {
     // State for unified event creation (Story 5.1 & 5.4)
     @State private var showEventInvitationModal = false
     
+    // State for similar event detection (Story 5.6)
+    @State private var showSimilarEventModal = false
+    
+    // State for conflict warning modal (Story 5.6)
+    @State private var showConflictWarningModal = false
+    
     // State for reminder features (Story 5.5)
     @State private var showReminderCreationModal = false
     @State private var selectedReminderData: ReminderDetection?
@@ -241,28 +247,57 @@ struct ChatView: View {
                     messageId: messageId,
                     conversationId: conversationId
                 ) { event in
-                    // Event created with invitations successfully - store in Firestore, link to chat, and dismiss AI prompt
+                    // Event created with invitations successfully - create via AI backend (indexes in Pinecone), store in Firestore, link to chat, and dismiss AI prompt
                     Task {
                         do {
-                            // Store event in Firestore first
-                            _ = try await eventService.createEvent(event)
-                            print("Event created and stored: \(event.title)")
+                            // Create event via AI backend first (this indexes it in Pinecone for conflict detection)
+                            let backendResponse = try await AIBackendService.shared.createEvent(
+                                title: event.title,
+                                date: formatDateISO(event.date),
+                                startTime: event.startTime,
+                                endTime: event.endTime,
+                                duration: event.duration,
+                                location: event.location,
+                                userId: AuthService.shared.currentUser?.userId ?? "unknown",
+                                conversationId: conversationId,
+                                messageId: messageId
+                            )
                             
-                            // Link event to chat if there are invitations
-                            if !event.invitations.isEmpty {
-                                let invitation = event.invitations[conversationId]
-                                if let invitation = invitation {
-                                    try await eventService.linkEventToChat(
-                                        eventId: event.eventId,
-                                        conversationId: conversationId,
-                                        messageId: messageId,
-                                        invitedUserIds: invitation.invitedUserIds
-                                    )
-                                    print("Event linked to chat with \(invitation.invitedUserIds.count) participants")
+                            if backendResponse.success {
+                                print("Event created and indexed in Pinecone: \(event.title)")
+                                
+                                // Store event in Firestore for local persistence
+                                _ = try await eventService.createEvent(event)
+                                print("Event stored in Firestore: \(event.title)")
+                                
+                                // Link event to chat if there are invitations
+                                if !event.invitations.isEmpty {
+                                    let invitation = event.invitations[conversationId]
+                                    if let invitation = invitation {
+                                        try await eventService.linkEventToChat(
+                                            eventId: event.eventId,
+                                            conversationId: conversationId,
+                                            messageId: messageId,
+                                            invitedUserIds: invitation.invitedUserIds
+                                        )
+                                        print("Event linked to chat with \(invitation.invitedUserIds.count) participants")
+                                    }
                                 }
+                            } else {
+                                print("Backend event creation failed: \(backendResponse.message)")
+                                // Still store in Firestore as fallback
+                                _ = try await eventService.createEvent(event)
+                                print("Event stored in Firestore as fallback: \(event.title)")
                             }
                         } catch {
-                            print("Failed to store or link event: \(error.localizedDescription)")
+                            print("Failed to create/store/link event: \(error.localizedDescription)")
+                            // Fallback: store in Firestore only
+                            do {
+                                _ = try await eventService.createEvent(event)
+                                print("Event stored in Firestore as fallback: \(event.title)")
+                            } catch {
+                                print("Failed to store event in Firestore: \(error.localizedDescription)")
+                            }
                         }
                     }
                     viewModel.dismissAISuggestion(for: messageId)
@@ -305,6 +340,92 @@ struct ChatView: View {
             // Per-Chat Reminders View (Story 5.5 AC5)
             if let conversationId = conversationId {
                 ChatRemindersView(conversationId: conversationId)
+            }
+        }
+        .sheet(isPresented: $showSimilarEventModal) {
+            // Similar Event Detection Modal (Story 5.6)
+            if let messageId = selectedMessageId,
+               let conversationId = conversationId,
+               let analysis = viewModel.aiSuggestions[messageId],
+               let eventData = selectedEventData {
+                SimilarEventModal(
+                    messageId: messageId,
+                    conversationId: conversationId,
+                    calendarData: eventData,
+                    analysis: analysis,
+                    onDismiss: {
+                        showSimilarEventModal = false
+                    },
+                    onLinkToEvent: { eventId in
+                        // Link to existing event - invite participants
+                        Task {
+                            do {
+                                // Get conversation participants (excluding current user)
+                                    guard let currentUser = AuthService.shared.currentUser else {
+                                        return
+                                    }
+                                
+                                // Get conversation to find participants
+                                let firestoreService = FirestoreService()
+                                let conversation = try await firestoreService.getConversation(conversationId: conversationId)
+                                
+                                // Get participants to invite (exclude current user)
+                                let participantsToInvite = conversation.participants.filter { $0 != currentUser.userId }
+                                
+                                if participantsToInvite.isEmpty {
+                                    return
+                                }
+                                
+                                // Link the existing event to this conversation
+                                try await eventService.linkEventToChat(
+                                    eventId: eventId,
+                                    conversationId: conversationId,
+                                    messageId: messageId,
+                                    invitedUserIds: participantsToInvite
+                                )
+                                
+                                // Dismiss the AI suggestion
+                                await MainActor.run {
+                                    viewModel.dismissAISuggestion(for: messageId)
+                                }
+                                
+                            } catch {
+                                // Still dismiss the AI suggestion to avoid confusion
+                                await MainActor.run {
+                                    viewModel.dismissAISuggestion(for: messageId)
+                                }
+                            }
+                        }
+                        showSimilarEventModal = false
+                    },
+                    onCreateNewEvent: {
+                        // Create new event - show normal event creation modal
+                        showSimilarEventModal = false
+                        showEventInvitationModal = true
+                    }
+                )
+            }
+        }
+        .sheet(isPresented: $showConflictWarningModal) {
+            // Conflict Warning Modal (Story 5.6)
+            if let messageId = selectedMessageId,
+               let conversationId = conversationId,
+               let analysis = viewModel.aiSuggestions[messageId],
+               let eventData = selectedEventData {
+                ConflictWarningModal(
+                    messageId: messageId,
+                    conversationId: conversationId,
+                    calendarData: eventData,
+                    analysis: analysis,
+                    onDismiss: {
+                        showConflictWarningModal = false
+                    },
+                    onCreateAnyway: {
+                        // Create event anyway - show normal event creation modal
+                        showConflictWarningModal = false
+                        showEventInvitationModal = true
+                    }
+                )
             }
         }
     }
@@ -366,19 +487,49 @@ struct ChatView: View {
                                            let analysis = viewModel.aiSuggestions[message.messageId],
                                            !viewModel.dismissedAISuggestions.contains(message.messageId) {
                                             Group {
-                                                // Unified event creation - use single blue button for calendar detection
+                                                // Calendar events - unified flow (Story 5.6)
                                                 if analysis.calendar.detected {
-                                                    AIPromptButtonCompact(
-                                                        icon: "calendar.badge.plus",
-                                                        text: "Add to calendar",
-                                                        tintColor: .blue
-                                                    ) {
-                                                        // Always use EventInvitationModal for unified flow
-                                                        selectedEventData = analysis.calendar
-                                                        selectedMessageId = message.messageId
-                                                        showEventInvitationModal = true
+                                                    // Check for conflicts first (Story 5.6 - Event Conflict Detection)
+                                                    if analysis.conflict.detected {
+                                                        AIPromptButtonCompact(
+                                                            icon: "exclamationmark.triangle.fill",
+                                                            text: "Add to calendar",
+                                                            tintColor: .orange
+                                                        ) {
+                                                            // Show conflict warning modal
+                                                            selectedEventData = analysis.calendar
+                                                            selectedMessageId = message.messageId
+                                                            showConflictWarningModal = true
+                                                        }
                                                     }
-                                                } else if analysis.reminder.detected {
+                                                    // Check for similar events (Story 5.6 - Similar Event Detection)
+                                                    else if analysis.calendar.similarEvents?.isEmpty == false {
+                                                        AIPromptButtonCompact(
+                                                            icon: "link",
+                                                            text: "Link to Event",
+                                                            tintColor: .blue
+                                                        ) {
+                                                            // Show similar event modal
+                                                            selectedEventData = analysis.calendar
+                                                            selectedMessageId = message.messageId
+                                                            showSimilarEventModal = true
+                                                        }
+                                                    }
+                                                    // Regular calendar events
+                                                    else {
+                                                        AIPromptButtonCompact(
+                                                            icon: "calendar.badge.plus",
+                                                            text: "Add to calendar",
+                                                            tintColor: .blue
+                                                        ) {
+                                                            // Normal event creation
+                                                            selectedEventData = analysis.calendar
+                                                            selectedMessageId = message.messageId
+                                                            showEventInvitationModal = true
+                                                        }
+                                                    }
+                                                }
+                                                else if analysis.reminder.detected {
                                                     AIPromptButtonCompact(
                                                         icon: "bell.badge.fill",
                                                         text: "Set reminder",
@@ -513,7 +664,6 @@ struct ChatView: View {
     private func scrollToMessage(messageId: String) {
         // Check if message exists in the current messages
         guard viewModel.messages.contains(where: { $0.id == messageId }) else {
-            print("⚠️ ChatView: Message \(messageId) not found in current messages")
             // Could show an alert here if needed
             return
         }
@@ -533,6 +683,14 @@ struct ChatView: View {
                 highlightedMessageId = nil
             }
         }
+    }
+    
+    // MARK: - Helper Functions
+    
+    private func formatDateISO(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate]
+        return formatter.string(from: date)
     }
 }
 
@@ -555,4 +713,3 @@ struct ChatView: View {
         )
     }
 }
-

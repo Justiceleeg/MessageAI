@@ -21,7 +21,7 @@ class EventService {
     
     // MARK: - CRUD Methods
     
-    /// Creates a new event in Firestore
+    /// Creates a new event in Firestore and indexes it in Pinecone
     /// - Parameter event: Event to create
     /// - Returns: Created event
     /// - Throws: Error if creation fails
@@ -29,10 +29,15 @@ class EventService {
         logger.info("Creating event: \(event.eventId)")
         
         do {
+            // 1. Create event in Firestore
             let docRef = db.collection(eventsCollection).document(event.eventId)
             let data = try Firestore.Encoder().encode(event)
             try await docRef.setData(data)
-            logger.info("Event created successfully: \(event.eventId)")
+            logger.info("Event created successfully in Firestore: \(event.eventId)")
+            
+            // 2. Index event in Pinecone for conflict detection
+            await indexEventInPinecone(event)
+            
             return event
             
         } catch {
@@ -205,10 +210,14 @@ class EventService {
         logger.info("Updating event: \(event.eventId)")
         
         do {
+            // 1. Update event in Firestore
             let docRef = db.collection(eventsCollection).document(event.eventId)
             let data = try Firestore.Encoder().encode(event)
             try await docRef.setData(data, merge: true)
-            logger.info("Event updated successfully: \(event.eventId)")
+            logger.info("Event updated successfully in Firestore: \(event.eventId)")
+            
+            // 2. Update event in Pinecone
+            await updateEventInPinecone(event)
             
         } catch {
             logger.error("Failed to update event: \(error.localizedDescription)")
@@ -224,15 +233,16 @@ class EventService {
         print("🗑️ DEBUG: EventService.deleteEvent called for: \(id)")
         
         do {
+            // 1. Delete event from Firestore
             let docRef = db.collection(eventsCollection).document(id)
             print("🗑️ DEBUG: Document reference: \(docRef.path)")
             try await docRef.delete()
-            print("✅ DEBUG: Event deleted from Firestore successfully: \(id)")
-            logger.info("Event deleted successfully: \(id)")
+            logger.info("Event deleted successfully from Firestore: \(id)")
+            
+            // 2. Remove event from Pinecone
+            await removeEventFromPinecone(id)
             
         } catch {
-            print("❌ DEBUG: EventService.deleteEvent failed: \(error.localizedDescription)")
-            print("❌ DEBUG: Full error: \(error)")
             logger.error("Failed to delete event: \(error.localizedDescription)")
             throw error
         }
@@ -519,9 +529,11 @@ class EventService {
             
             // Add new attendees
             var updatedAttendees = event.attendees
+            var newAttendeesAdded = 0
             for userId in invitedUserIds {
                 if updatedAttendees[userId] == nil {
                     updatedAttendees[userId] = Attendee(status: .pending)
+                    newAttendeesAdded += 1
                 }
             }
             
@@ -531,11 +543,133 @@ class EventService {
                 "attendees": try Firestore.Encoder().encode(updatedAttendees)
             ])
             
+            // Update message metadata to include eventId and isInvitation
+            try await updateMessageMetadata(
+                messageId: messageId,
+                conversationId: conversationId,
+                eventId: eventId,
+                isInvitation: true
+            )
+            
             logger.info("Event linked successfully: \(eventId)")
             
         } catch {
             logger.error("Failed to link event: \(error.localizedDescription)")
             throw error
+        }
+    }
+    
+    /// Updates message metadata to include eventId and isInvitation
+    /// - Parameters:
+    ///   - messageId: ID of the message to update
+    ///   - conversationId: ID of the conversation containing the message
+    ///   - eventId: ID of the event to link to the message
+    ///   - isInvitation: Whether this message is an invitation
+    /// - Throws: Error if update fails
+    private func updateMessageMetadata(
+        messageId: String,
+        conversationId: String,
+        eventId: String,
+        isInvitation: Bool
+    ) async throws {
+        logger.info("Updating message metadata for message \(messageId)")
+        
+        do {
+            let messageRef = db.collection("conversations")
+                .document(conversationId)
+                .collection("messages")
+                .document(messageId)
+            
+            let metadataData: [String: Any] = [
+                "eventId": eventId,
+                "isInvitation": isInvitation
+            ]
+            
+            try await messageRef.updateData([
+                "metadata": metadataData
+            ])
+            
+            logger.info("Message metadata updated successfully: \(messageId)")
+            
+        } catch {
+            logger.error("Failed to update message metadata: \(error.localizedDescription)")
+            throw error
+        }
+    }
+    
+    // MARK: - Pinecone Indexing Methods
+    
+    /// Indexes an event in Pinecone for conflict detection
+    /// - Parameter event: Event to index
+    private func indexEventInPinecone(_ event: Event) async {
+        do {
+            let aiBackendService = AIBackendService.shared
+            
+            // Prepare event data for indexing
+            let eventData: [String: Any] = [
+                "id": event.eventId,
+                "user_id": event.creatorUserId,
+                "title": event.title,
+                "date": event.date.formatted(.iso8601.year().month().day()),
+                "startTime": event.startTime ?? "",
+                "endTime": event.endTime ?? "",
+                "location": event.location ?? "",
+                "conversation_id": event.createdInConversationId,
+                "created_at": event.createdAt.formatted(.iso8601)
+            ]
+            
+            // Call backend to index event
+            try await aiBackendService.indexEvent(eventData)
+            logger.info("Event indexed successfully in Pinecone: \(event.eventId)")
+            
+        } catch {
+            logger.error("Failed to index event in Pinecone: \(error.localizedDescription)")
+            // Don't throw error - Pinecone indexing is not critical for event creation
+        }
+    }
+    
+    /// Updates an event in Pinecone index
+    /// - Parameter event: Updated event
+    private func updateEventInPinecone(_ event: Event) async {
+        do {
+            let aiBackendService = AIBackendService.shared
+            
+            // Prepare event data for updating
+            let eventData: [String: Any] = [
+                "id": event.eventId,
+                "user_id": event.creatorUserId,
+                "title": event.title,
+                "date": event.date.formatted(.iso8601.year().month().day()),
+                "startTime": event.startTime ?? "",
+                "endTime": event.endTime ?? "",
+                "location": event.location ?? "",
+                "conversation_id": event.createdInConversationId,
+                "created_at": event.createdAt.formatted(.iso8601)
+            ]
+            
+            // Call backend to update event
+            try await aiBackendService.updateEvent(event.eventId, eventData)
+            logger.info("Event updated successfully in Pinecone: \(event.eventId)")
+            
+        } catch {
+            logger.error("Failed to update event in Pinecone: \(error.localizedDescription)")
+            // Don't throw error - Pinecone indexing is not critical for event updates
+        }
+    }
+    
+    /// Removes an event from Pinecone index
+    /// - Parameter eventId: ID of event to remove
+    private func removeEventFromPinecone(_ eventId: String) async {
+        do {
+            let aiBackendService = AIBackendService.shared
+            
+            // Call backend to remove event
+            try await aiBackendService.deleteEvent(eventId)
+            logger.info("Event removed successfully from Pinecone: \(eventId)")
+            
+        } catch {
+            logger.error("Failed to remove event from Pinecone: \(error.localizedDescription)")
+            // Don't throw error - Pinecone indexing is not critical for event deletion
         }
     }
 }

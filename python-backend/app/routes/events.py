@@ -1,13 +1,12 @@
 """
-Events Routes
-Handles event creation, search, and deduplication
+Event Routes
+Handles event creation, indexing and conflict detection
 """
 from fastapi import APIRouter, HTTPException
-from app.models.requests import EventCreateRequest, EventSearchRequest
-from app.models.responses import EventCreateResponse, EventSearchResponse, EventSearchResult
-from app.services.openai_service import get_openai_service
-from app.services.vector_store import get_vector_store
-import uuid
+from typing import Dict, Any
+from app.services.event_indexing_service import get_event_indexing_service
+from app.models.requests import EventCreateRequest
+from app.models.responses import EventCreateResponse
 
 router = APIRouter()
 
@@ -17,75 +16,60 @@ async def create_event(request: EventCreateRequest):
     """
     Create a new event with deduplication check using vector similarity.
     
-    Before creating, checks if similar event exists (similarity > 0.85).
+    Before creating, checks if similar event exists (similarity > 0.75).
     If found, suggests linking to existing event.
     Otherwise, creates new event and stores embedding for future deduplication.
     """
+    import time
+    route_start = time.time()
+    
     try:
         # Get services
-        openai_service = get_openai_service()
-        vector_store = get_vector_store()
+        import uuid
+        event_service = get_event_indexing_service()
         
         # Create search query for deduplication (title + date)
         query = f"{request.title} {request.date}"
         
-        # Search for similar events using vector similarity
-        # Check for similar events by the same creator (for multi-chat linking)
-        similar_events = vector_store.search_similar_events(
-            query=query,
-            k=3,
-            filter_dict={"user_id": request.user_id}  # Only same creator's events
-        )
-        
-        # Check for high similarity (multi-chat linking threshold)
-        # Lower threshold for multi-chat linking since events might be worded differently
-        SIMILARITY_THRESHOLD = 0.75
-        for event in similar_events:
-            similarity = event.get("similarity", 0.0)
-            # Note: Pinecone similarity_search_with_score returns values where higher is MORE similar
-            # We need to check if it's above threshold
-            if similarity >= SIMILARITY_THRESHOLD:
-                # Found potential duplicate - suggest linking to existing event
-                return EventCreateResponse(
-                    success=False,
-                    event_id=None,
-                    suggest_link=True,
-                    similar_event={
-                        "event_id": event["metadata"].get("event_id"),
-                        "title": event["metadata"].get("title"),
-                        "date": event["metadata"].get("date"),
-                        "similarity": similarity
-                    },
-                    message="Similar event found. Link to existing event?"
-                )
-        
-        # No duplicates found - create new event
+        # Create event data first - ensure no null values
         event_id = f"evt_{uuid.uuid4().hex[:12]}"
-        
-        # Store event embedding in vector store
-        event_metadata = {
-            "event_id": event_id,
-            "title": request.title,
-            "date": request.date,
-            "user_id": request.user_id,
-            "conversation_id": request.conversation_id,
-            "message_id": request.message_id
+        event_data = {
+            "id": event_id,
+            "user_id": request.user_id or "",
+            "title": request.title or "",
+            "date": request.date or "",
+            "startTime": request.startTime or "",
+            "endTime": request.endTime or "",
+            "duration": request.duration or 0,
+            "location": request.location or "",
+            "conversation_id": request.conversation_id or "",
+            "message_id": request.message_id or ""
         }
         
-        # Only add optional fields if they have values
-        if request.time is not None:
-            event_metadata["time"] = request.time
-        if request.location is not None:
-            event_metadata["location"] = request.location
+        # Check for duplicates and index in one operation
+        duplicate_check = event_service.check_duplicates_and_index(event_data, query)
         
-        vector_store.add_event(
-            event_id=event_id,
-            text=query,
-            metadata=event_metadata
-        )
+        if duplicate_check["is_duplicate"]:
+            # Found potential duplicate - suggest linking to existing event
+            return EventCreateResponse(
+                success=False,
+                event_id=None,
+                suggest_link=True,
+                similar_event={
+                    "event_id": duplicate_check["similar_event"]["event_id"],
+                    "title": duplicate_check["similar_event"]["title"],
+                    "date": duplicate_check["similar_event"]["date"],
+                    "similarity": duplicate_check["similar_event"]["similarity_score"]
+                },
+                message="Similar event found. Link to existing event?"
+            )
         
-        # Note: Message metadata update is handled by the iOS client
-        # The client will update the message with invitation metadata after event creation
+        # Event was indexed successfully
+        if not duplicate_check["indexed"]:
+            raise HTTPException(status_code=500, detail="Failed to index event")
+        
+        total_route_time = time.time() - route_start
+        print(f"🚀 Total route time: {total_route_time:.3f}s")
         
         return EventCreateResponse(
             success=True,
@@ -102,75 +86,132 @@ async def create_event(request: EventCreateRequest):
         raise HTTPException(status_code=500, detail=f"Failed to create event: {str(e)}")
 
 
-@router.post("/events/search", response_model=EventSearchResponse)
-async def search_events(request: EventSearchRequest):
+@router.post("/events/index")
+async def index_event(event: Dict[str, Any]):
     """
-    Search for similar events using semantic search.
-    Used for deduplication and event discovery.
-    """
-    try:
-        vector_store = get_vector_store()
+    Index an event in Pinecone for conflict detection
+    
+    Args:
+        event: Event dictionary with id, title, date, startTime, endTime, etc.
         
-        # Search for similar events
-        similar_events = vector_store.search_similar_events(
-            query=request.query,
-            k=request.k,
-            filter_dict={"user_id": request.user_id}
-        )
-        
-        # Build response
-        results = [
-            EventSearchResult(
-                event_id=event["metadata"].get("event_id", ""),
-                title=event["metadata"].get("title", ""),
-                date=event["metadata"].get("date", ""),
-                similarity=event.get("similarity", 0.0)
-            )
-            for event in similar_events
-        ]
-        
-        return EventSearchResponse(results=results)
-        
-    except Exception as e:
-        print(f"Error searching events: {e}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Failed to search events: {str(e)}")
-
-
-@router.post("/events/link")
-async def link_event_to_chat(event_id: str, conversation_id: str, user_id: str):
-    """
-    Link an existing event to a new chat conversation.
-    Used for multi-chat event linking (Story 5.4).
+    Returns:
+        Success status
     """
     try:
-        # This endpoint would typically update Firestore to add the conversation
-        # to the event's invitations map, but since this is a backend-only service,
-        # the actual Firestore update will be handled by the iOS client.
+        event_service = get_event_indexing_service()
+        success = event_service.index_event(event)
         
-        # For now, return success - the iOS client will handle the Firestore update
-        return {
-            "success": True,
-            "event_id": event_id,
-            "conversation_id": conversation_id,
-            "message": "Event linking request processed. iOS client will update Firestore."
-        }
+        if success:
+            return {"status": "success", "message": "Event indexed successfully"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to index event")
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to index event: {str(e)}")
+
+
+@router.put("/events/{event_id}/index")
+async def update_event(event_id: str, event: Dict[str, Any]):
+    """
+    Update an indexed event in Pinecone
+    
+    Args:
+        event_id: ID of event to update
+        event: Updated event dictionary
+        
+    Returns:
+        Success status
+    """
+    try:
+        # Ensure event has the correct ID
+        event["id"] = event_id
+        
+        event_service = get_event_indexing_service()
+        success = event_service.update_event(event)
+        
+        if success:
+            return {"status": "success", "message": "Event updated successfully"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to update event")
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update event: {str(e)}")
+
+
+@router.delete("/events/{event_id}/index")
+async def delete_event(event_id: str):
+    """
+    Delete an event from Pinecone index
+    
+    Args:
+        event_id: ID of event to delete
+        
+    Returns:
+        Success status
+    """
+    try:
+        event_service = get_event_indexing_service()
+        success = event_service.delete_event(event_id)
+        
+        if success:
+            return {"status": "success", "message": "Event deleted successfully"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to delete event")
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete event: {str(e)}")
+
+
+@router.post("/events/search-conflicts")
+async def search_conflicts(request: Dict[str, Any]):
+    """
+    Search for conflicts with a detected event
+    
+    Args:
+        request: Dictionary with detected_event and user_id
+        
+    Returns:
+        Conflict analysis results
+    """
+    try:
+        detected_event = request.get("detected_event")
+        user_id = request.get("user_id")
+        
+        if not detected_event or not user_id:
+            raise HTTPException(status_code=400, detail="detected_event and user_id are required")
+        
+        event_service = get_event_indexing_service()
+        results = event_service.search_conflicts(detected_event, user_id)
+        
+        return results
         
     except Exception as e:
-        print(f"Error linking event: {e}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Failed to link event: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to search conflicts: {str(e)}")
 
 
-@router.post("/events/detect")
-async def detect_events():
+@router.post("/events/search-similar")
+async def search_similar_events(request: Dict[str, Any]):
     """
-    Legacy endpoint - now replaced by /analyze-message
+    Search for similar events
+    
+    Args:
+        request: Dictionary with event and user_id
+        
+    Returns:
+        List of similar events
     """
-    return {
-        "status": "deprecated",
-        "message": "Use /analyze-message endpoint instead for event detection"
-    }
-
+    try:
+        event = request.get("event")
+        user_id = request.get("user_id")
+        limit = request.get("limit", 5)
+        
+        if not event or not user_id:
+            raise HTTPException(status_code=400, detail="event and user_id are required")
+        
+        event_service = get_event_indexing_service()
+        similar_events = event_service.search_similar_events(event, user_id, limit)
+        
+        return {"similar_events": similar_events}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to search similar events: {str(e)}")

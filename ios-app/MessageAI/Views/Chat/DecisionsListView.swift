@@ -115,14 +115,11 @@ struct DecisionsListView: View {
                 conversationId: conversationId
             )
             
-            print("✅ Fetched \(fetchedDecisions.count) decisions")
-            
             await MainActor.run {
                 decisions = fetchedDecisions
                 isLoading = false
             }
         } catch {
-            print("❌ Error loading decisions: \(error)")
             await MainActor.run {
                 errorMessage = error.localizedDescription
                 isLoading = false

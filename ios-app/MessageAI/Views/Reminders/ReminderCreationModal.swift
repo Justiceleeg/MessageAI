@@ -222,7 +222,8 @@ enum ReminderTiming: String, CaseIterable {
                 endTime: nil,
                 duration: nil,
                 location: nil,
-                isInvitation: false
+                isInvitation: false,
+                similarEvents: []
             ),
             reminder: ReminderDetection(
                 detected: true,
@@ -245,7 +246,9 @@ enum ReminderTiming: String, CaseIterable {
             ),
             conflict: ConflictDetection(
                 detected: false,
-                conflictingEvents: []
+                conflictingEvents: [],
+                reasoning: nil,
+                sameEventDetected: nil
             )
         ),
         messageId: "msg_123",

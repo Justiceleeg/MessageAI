@@ -83,7 +83,7 @@ struct AIPromptContainerCompact: View {
     var body: some View {
         HStack(spacing: 6) {
             // Priority 1: Invitation (Story 5.4) - now unified with calendar detection
-            if analysis.calendar.detected && analysis.calendar.isInvitation {
+            if analysis.calendar.detected && analysis.calendar.isInvitation ?? false {
                 AIPromptButtonCompact(
                     icon: "party.popper.fill",
                     text: "Create event & invite",
@@ -186,7 +186,7 @@ struct AIPromptContainer: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Priority 1: Invitation (Story 5.4) - now unified with calendar detection
-            if analysis.calendar.detected && analysis.calendar.isInvitation {
+            if analysis.calendar.detected && analysis.calendar.isInvitation ?? false {
                 AIPromptButton(
                     icon: "party.popper.fill",
                     text: "🎉 Create event & invite?",

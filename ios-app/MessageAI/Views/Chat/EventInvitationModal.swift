@@ -18,7 +18,7 @@ struct EventInvitationModal: View {
     @State private var location: String
     
     // Invitation settings
-    @State private var inviteAllParticipants: Bool = true
+    @State private var inviteAllParticipants: Bool
     
     // State
     @State private var isCreating = false
@@ -56,6 +56,8 @@ struct EventInvitationModal: View {
             }
             
             self._location = State(initialValue: calendarData.location ?? "")
+            // Set invitation toggle based on calendar data
+            self._inviteAllParticipants = State(initialValue: calendarData.isInvitation ?? false)
         } else if let analysis = analysis {
             self._title = State(initialValue: analysis.calendar.title ?? "")
             self._date = State(initialValue: Self.parseDate(from: analysis.calendar.date) ?? Date())
@@ -71,6 +73,8 @@ struct EventInvitationModal: View {
             }
             
             self._location = State(initialValue: analysis.calendar.location ?? "")
+            // Set invitation toggle based on analysis
+            self._inviteAllParticipants = State(initialValue: analysis.calendar.isInvitation ?? false)
         } else {
             self._title = State(initialValue: "")
             self._date = State(initialValue: Date())
@@ -78,6 +82,8 @@ struct EventInvitationModal: View {
             self._startTime = State(initialValue: Date())
             self._endTime = State(initialValue: Self.addHour(to: Date()))
             self._location = State(initialValue: "")
+            // Default to false for manual event creation
+            self._inviteAllParticipants = State(initialValue: false)
         }
     }
     
@@ -222,7 +228,6 @@ struct EventInvitationModal: View {
             }
             
             // Call backend to create event
-            print("🔍 Creating event: title=\(title), date=\(dateString), startTime=\(startTimeString ?? "nil"), endTime=\(endTimeString ?? "nil"), duration=\(duration ?? 0), location=\(location.isEmpty ? "nil" : location)")
             let response = try await aiBackendService.createEvent(
                 title: title,
                 date: dateString,
@@ -234,7 +239,6 @@ struct EventInvitationModal: View {
                 conversationId: conversationId,
                 messageId: messageId
             )
-            print("🔍 Backend response: success=\(response.success), eventId=\(response.eventId ?? "nil"), suggestLink=\(response.suggestLink)")
             
             // Check if backend suggests linking to existing event
             if response.suggestLink, let similarEvent = response.similarEvent {
@@ -279,7 +283,6 @@ struct EventInvitationModal: View {
             
             // Create Event object for callback
             if let eventId = response.eventId {
-                print("🔍 Creating Event object: eventId=\(eventId), attendees=\(attendees), invitation=\(invitation != nil)")
                 let event = Event(
                     eventId: eventId,
                     title: title,
@@ -387,9 +390,25 @@ struct EventInvitationModal: View {
     
     private static func parseDate(from dateString: String?) -> Date? {
         guard let dateString = dateString else { return nil }
+        
+        // Parse date components without timezone conversion
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.date(from: dateString)
+        
+        // Parse the date string to get components
+        guard let parsedDate = formatter.date(from: dateString) else { return nil }
+        
+        // Create a new date with the same calendar date but in local timezone
+        let calendar = Calendar.current
+        let components = calendar.dateComponents([.year, .month, .day], from: parsedDate)
+        
+        // Create date at noon local time to avoid timezone edge cases
+        var localComponents = components
+        localComponents.hour = 12
+        localComponents.minute = 0
+        localComponents.second = 0
+        
+        return calendar.date(from: localComponents)
     }
     
     private static func parseTime(from timeString: String?) -> Date? {
@@ -450,13 +469,19 @@ struct EventInvitationModal: View {
                 endTime: "23:00",
                 duration: 180,
                 location: "My place",
-                isInvitation: true
+                isInvitation: true,
+                similarEvents: []
             ),
             reminder: ReminderDetection(detected: false, title: nil, dueDate: nil),
             decision: DecisionDetection(detected: false, text: nil),
             rsvp: RSVPDetection(detected: false, status: nil, eventReference: nil),
             priority: PriorityDetection(detected: false, level: nil, reason: nil),
-            conflict: ConflictDetection(detected: false, conflictingEvents: [])
+            conflict: ConflictDetection(
+                detected: false,
+                conflictingEvents: [],
+                reasoning: nil,
+                sameEventDetected: nil
+            )
         ),
         messageId: "msg_123",
         conversationId: "conv_456"

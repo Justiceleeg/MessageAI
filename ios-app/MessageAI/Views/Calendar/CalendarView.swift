@@ -175,12 +175,8 @@ struct CalendarView: View {
             do {
                 print("🗑️ DEBUG: Calling eventService.deleteEvent")
                 try await eventService.deleteEvent(id: event.eventId)
-                print("✅ DEBUG: Event deleted successfully")
                 selectedEvent = nil
-                print("✅ DEBUG: selectedEvent set to nil")
             } catch {
-                print("❌ DEBUG: Failed to delete event: \(error.localizedDescription)")
-                print("❌ DEBUG: Full error: \(error)")
                 errorMessage = "Failed to delete event: \(error.localizedDescription)"
             }
         }

@@ -48,7 +48,7 @@ async def store_decision_vector(request: DecisionCreateRequest):
         )
         
     except Exception as e:
-        print(f"❌ Error storing decision vector: {e}")
+        # Error storing decision vector, continue without indexing
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -95,7 +95,7 @@ async def search_decisions(
         return DecisionSearchResponse(results=search_results)
         
     except Exception as e:
-        print(f"❌ Error searching decisions: {e}")
+        # Error searching decisions, return empty results
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -116,7 +116,7 @@ async def delete_decision_vector(decision_id: str):
         return {"success": True, "message": "Decision vector deleted successfully"}
         
     except Exception as e:
-        print(f"❌ Error deleting decision vector: {e}")
+        # Error deleting decision vector, continue
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
