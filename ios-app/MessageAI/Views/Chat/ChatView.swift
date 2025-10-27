@@ -361,9 +361,9 @@ struct ChatView: View {
                         Task {
                             do {
                                 // Get conversation participants (excluding current user)
-                                    guard let currentUser = AuthService.shared.currentUser else {
-                                        return
-                                    }
+                                guard let currentUser = AuthService.shared.currentUser else {
+                                    return
+                                }
                                 
                                 // Get conversation to find participants
                                 let firestoreService = FirestoreService()
@@ -489,21 +489,8 @@ struct ChatView: View {
                                             Group {
                                                 // Calendar events - unified flow (Story 5.6)
                                                 if analysis.calendar.detected {
-                                                    // Check for conflicts first (Story 5.6 - Event Conflict Detection)
-                                                    if analysis.conflict.detected {
-                                                        AIPromptButtonCompact(
-                                                            icon: "exclamationmark.triangle.fill",
-                                                            text: "Add to calendar",
-                                                            tintColor: .orange
-                                                        ) {
-                                                            // Show conflict warning modal
-                                                            selectedEventData = analysis.calendar
-                                                            selectedMessageId = message.messageId
-                                                            showConflictWarningModal = true
-                                                        }
-                                                    }
-                                                    // Check for similar events (Story 5.6 - Similar Event Detection)
-                                                    else if analysis.calendar.similarEvents?.isEmpty == false {
+                                                    // Check for same event detection first (Story 5.6 - Similar Event Linking)
+                                                    if analysis.conflict.sameEventDetected == true && !analysis.conflict.conflictingEvents.isEmpty {
                                                         AIPromptButtonCompact(
                                                             icon: "link",
                                                             text: "Link to Event",
@@ -515,7 +502,20 @@ struct ChatView: View {
                                                             showSimilarEventModal = true
                                                         }
                                                     }
-                                                    // Regular calendar events
+                                                    // Check for actual conflicts (Story 5.6 - Event Conflict Detection)
+                                                    else if analysis.conflict.detected && analysis.conflict.sameEventDetected != true {
+                                                        AIPromptButtonCompact(
+                                                            icon: "exclamationmark.triangle.fill",
+                                                            text: "Add to calendar",
+                                                            tintColor: .orange
+                                                        ) {
+                                                            // Show conflict warning modal
+                                                            selectedEventData = analysis.calendar
+                                                            selectedMessageId = message.messageId
+                                                            showConflictWarningModal = true
+                                                        }
+                                                    }
+                                                    // Regular calendar events (no conflicts or similar events)
                                                     else {
                                                         AIPromptButtonCompact(
                                                             icon: "calendar.badge.plus",

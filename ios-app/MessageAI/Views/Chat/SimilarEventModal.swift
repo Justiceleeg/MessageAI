@@ -82,9 +82,11 @@ struct SimilarEventModal: View {
                 VStack(spacing: 12) {
                     // Link to existing event
                     Button(action: {
-                        if let existingEvent = existingEvent {
-                            onLinkToEvent(existingEvent.id)
+                        guard let existingEvent = existingEvent else {
+                            return
                         }
+                        
+                        onLinkToEvent(existingEvent.id)
                     }) {
                         HStack {
                             Image(systemName: "link")

@@ -171,33 +171,34 @@ class EventIndexingService:
                 # Calculate cosine similarity
                 similarity = self._calculate_cosine_similarity(detected_embedding, existing_embedding)
                 
+                # Create conflict object with full details
+                conflict_obj = {
+                    "id": event_id,
+                    "title": title,
+                    "date": event_data.get("date"),
+                    "startTime": event_data.get("startTime"),
+                    "endTime": event_data.get("endTime"),
+                    "location": event_data.get("location"),
+                    "similarity_score": similarity
+                }
+                
                 if similarity > 0.7:  # High threshold for same event (70%+ similarity)
                     same_event_detected = True
                     similar_events.append(event_id)
+                    # ALSO add to conflicts array so UI can display details
+                    conflicts.append(conflict_obj)
                 else:
                     # Different event = conflict
-                    conflict = {
-                        "id": event_id,
-                        "title": title,
-                        "date": event_data.get("date"),
-                        "startTime": event_data.get("startTime"),
-                        "endTime": event_data.get("endTime"),
-                        "location": event_data.get("location"),
-                        "similarity_score": similarity
-                    }
-                    conflicts.append(conflict)
+                    conflicts.append(conflict_obj)
             
-            # STEP 3: Also search for semantically similar events (for non-time conflicts)
-            semantic_similar = self._search_semantic_similar(detected_event, user_id)
+            # NOTE: We DO NOT include non-time-overlapping events in similar_events
+            # because the UI should only show linking when events actually overlap in time.
+            # Semantic-only matches without time overlap are noise and create false positives.
             
-            # Add non-time-conflicting similar events
-            for event_data in semantic_similar:
-                event_id = event_data["event_id"]
-                if not any(c["id"] == event_id for c in conflicts):  # Not already in conflicts
-                    similar_events.append(event_id)
+            has_conflicts = len(conflicts) > 0
             
             return {
-                "has_conflicts": len(conflicts) > 0,
+                "has_conflicts": has_conflicts,
                 "conflicts": conflicts,
                 "same_event_detected": same_event_detected,
                 "similar_events": similar_events,
@@ -206,6 +207,8 @@ class EventIndexingService:
             
         except Exception as e:
             logger.error(f"❌ Conflict search failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return {
                 "has_conflicts": False,
                 "conflicts": [],
@@ -463,12 +466,15 @@ class EventIndexingService:
                 logger.warning("Missing time information for conflict detection")
                 return []
             
-            # Search for events on the same date
-            # Note: This is a simplified approach - in production you'd want more sophisticated time filtering
+            # Search for events on the same date using BOTH semantic search AND metadata filtering
+            # The metadata filter ensures we ONLY get events on the exact date
             results = self.events_store.similarity_search_with_score(
-                query=f"date {detected_date}",  # Search by date
+                query=f"{detected_event.get('title', '')} {detected_date}",  # Semantic query
                 k=20,  # Get more results to filter by time
-                filter={"user_id": user_id}  # Filter by user
+                filter={
+                    "user_id": user_id,  # Exact user match
+                    "date": detected_date  # Exact date match (CRITICAL!)
+                }
             )
             
             time_conflicts = []
@@ -476,7 +482,7 @@ class EventIndexingService:
                 metadata = doc.metadata
                 event_date = metadata.get("date", "")
                 
-                # CRITICAL FIX: Only check time overlap if dates match
+                # Double-check date match (should already be filtered by Pinecone)
                 if event_date == detected_date:
                     # Check if times overlap
                     if self._times_overlap(
@@ -496,6 +502,8 @@ class EventIndexingService:
             
         except Exception as e:
             logger.error(f"❌ Time conflict search failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return []
     
     def _search_semantic_similar(self, detected_event: Dict[str, Any], user_id: str) -> List[Dict[str, Any]]:

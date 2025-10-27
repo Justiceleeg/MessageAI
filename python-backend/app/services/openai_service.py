@@ -5,6 +5,9 @@ Handles direct OpenAI API interactions for chat completions and embeddings
 from openai import OpenAI
 import os
 from typing import List, Dict, Any, Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class OpenAIService:
@@ -434,29 +437,28 @@ Analyze the message and use the analyze_message function to return structured re
                     if not conflict_user_id and user_calendar and len(user_calendar) > 0:
                         conflict_user_id = user_calendar[0].get("user_id", "test_user")
                     
-                    # Check for conflicts using Pinecone
-                    conflict_analysis = self._check_calendar_conflicts_pinecone(
-                        {
-                            "title": result["calendar"]["title"],
-                            "date": result["calendar"]["date"],
-                            "startTime": result["calendar"]["startTime"],
-                            "endTime": result["calendar"]["endTime"],
-                            "location": result["calendar"]["location"]
-                        },
-                        conflict_user_id
-                    )
-                    
-                    # Update conflict section with Pinecone results
-                    result["conflict"]["detected"] = conflict_analysis["has_conflicts"]
-                    result["conflict"]["conflicting_events"] = conflict_analysis["conflicts"]  # Fixed key name
-                    result["conflict"]["reasoning"] = conflict_analysis["reasoning"]
-                    result["conflict"]["same_event_detected"] = conflict_analysis["same_event_detected"]
-                    
-                    # Update calendar section with similar events
-                    result["calendar"]["similar_events"] = conflict_analysis.get("similar_events", [])
-                else:
-                    # No calendar event detected, skip conflict detection
-                    pass
+                    # Check if we have all required fields for conflict detection
+                    if result["calendar"]["date"] and result["calendar"]["startTime"] and result["calendar"]["endTime"]:
+                        # Check for conflicts using Pinecone
+                        conflict_analysis = self._check_calendar_conflicts_pinecone(
+                            {
+                                "title": result["calendar"]["title"],
+                                "date": result["calendar"]["date"],
+                                "startTime": result["calendar"]["startTime"],
+                                "endTime": result["calendar"]["endTime"],
+                                "location": result["calendar"]["location"]
+                            },
+                            conflict_user_id
+                        )
+                        
+                        # Update conflict section with Pinecone results
+                        result["conflict"]["detected"] = conflict_analysis["has_conflicts"]
+                        result["conflict"]["conflicting_events"] = conflict_analysis["conflicts"]
+                        result["conflict"]["reasoning"] = conflict_analysis["reasoning"]
+                        result["conflict"]["same_event_detected"] = conflict_analysis["same_event_detected"]
+                        
+                        # Update calendar section with similar events
+                        result["calendar"]["similar_events"] = conflict_analysis.get("similar_events", [])
                 
                 return result
             else:
