@@ -11,6 +11,11 @@ struct SimilarEventModal: View {
     
     @State private var selectedEventId: String?
     
+    // Get the existing event from conflict detection
+    private var existingEvent: ConflictEvent? {
+        return analysis.conflict.conflictingEvents.first
+    }
+    
     var body: some View {
         NavigationView {
             VStack(spacing: 20) {
@@ -32,51 +37,53 @@ struct SimilarEventModal: View {
                 }
                 .padding(.top)
                 
-                // Event details
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Detected Event:")
-                        .font(.headline)
-                        .foregroundColor(.primary)
-                    
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Image(systemName: "calendar")
-                                .foregroundColor(.blue)
-                            Text(calendarData.title ?? "Untitled Event")
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-                        }
+                // Existing Event details (the one found in database)
+                if let existingEvent = existingEvent {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Existing Event:")
+                            .font(.headline)
+                            .foregroundColor(.primary)
                         
-                        if let date = calendarData.date {
+                        VStack(alignment: .leading, spacing: 8) {
                             HStack {
-                                Image(systemName: "clock")
+                                Image(systemName: "calendar")
                                     .foregroundColor(.blue)
-                                Text(formatEventTime(date: date, startTime: calendarData.startTime, endTime: calendarData.endTime))
+                                Text(existingEvent.title)
                                     .font(.subheadline)
+                                    .fontWeight(.medium)
+                            }
+                            
+                            if let date = existingEvent.date {
+                                HStack {
+                                    Image(systemName: "clock")
+                                        .foregroundColor(.blue)
+                                    Text(formatEventTime(date: date, startTime: existingEvent.startTime, endTime: existingEvent.endTime))
+                                        .font(.subheadline)
+                                }
+                            }
+                            
+                            if let location = existingEvent.location, !location.isEmpty {
+                                HStack {
+                                    Image(systemName: "location")
+                                        .foregroundColor(.blue)
+                                    Text(location)
+                                        .font(.subheadline)
+                                }
                             }
                         }
-                        
-                        if let location = calendarData.location, !location.isEmpty {
-                            HStack {
-                                Image(systemName: "location")
-                                    .foregroundColor(.blue)
-                                Text(location)
-                                    .font(.subheadline)
-                            }
-                        }
+                        .padding()
+                        .background(Color(.systemGray6))
+                        .cornerRadius(12)
                     }
-                    .padding()
-                    .background(Color(.systemGray6))
-                    .cornerRadius(12)
+                    .padding(.horizontal)
                 }
-                .padding(.horizontal)
                 
                 // Action buttons
                 VStack(spacing: 12) {
                     // Link to existing event
                     Button(action: {
-                        if let firstEventId = calendarData.similarEvents?.first {
-                            onLinkToEvent(firstEventId)
+                        if let existingEvent = existingEvent {
+                            onLinkToEvent(existingEvent.id)
                         }
                     }) {
                         HStack {
@@ -193,10 +200,20 @@ struct SimilarEventModal: View {
             rsvp: RSVPDetection(detected: false, status: nil, eventReference: nil),
             priority: PriorityDetection(detected: false, level: nil, reason: nil),
             conflict: ConflictDetection(
-                detected: false,
-                conflictingEvents: [],
-                reasoning: nil,
-                sameEventDetected: nil
+                detected: true,
+                conflictingEvents: [
+                    ConflictEvent(
+                        id: "evt_existing123",
+                        title: "Weekly Skateboarding Meetup",
+                        date: "2025-10-26",
+                        startTime: "18:30",
+                        endTime: "20:30",
+                        location: "Central Park Skate Area",
+                        similarityScore: 0.92
+                    )
+                ],
+                reasoning: "This appears to be the same event (high similarity detected)",
+                sameEventDetected: true
             )
         ),
         onDismiss: {},

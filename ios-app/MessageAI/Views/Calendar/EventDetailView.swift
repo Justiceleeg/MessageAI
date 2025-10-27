@@ -423,6 +423,7 @@ struct LinkedChatRowView: View {
     
     @State private var conversationName: String = "Loading..."
     @State private var shouldNavigateToChat = false
+    @Environment(\.dismiss) private var dismiss
     
     private let firestoreService = FirestoreService()
     
@@ -442,7 +443,7 @@ struct LinkedChatRowView: View {
                 Spacer()
                 
                 Button("Jump to Chat") {
-                    shouldNavigateToChat = true
+                    navigateToChat()
                 }
                 .font(.caption)
                 .padding(.horizontal, 12)
@@ -482,13 +483,24 @@ struct LinkedChatRowView: View {
             await loadConversationName()
         }
         .onTapGesture {
-            shouldNavigateToChat = true
+            navigateToChat()
         }
-        .sheet(isPresented: $shouldNavigateToChat) {
-            // Navigate to chat view
-            NavigationStack {
-                ChatView(conversationId: conversationId, otherUserId: "")
-            }
+    }
+    
+    private func navigateToChat() {
+        // Dismiss the event detail sheet first
+        dismiss()
+        
+        // Post notification to navigate to conversation
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            NotificationCenter.default.post(
+                name: .navigateToConversationWithMessage,
+                object: nil,
+                userInfo: [
+                    "conversationId": conversationId,
+                    "messageId": invitation.messageId
+                ]
+            )
         }
     }
     
