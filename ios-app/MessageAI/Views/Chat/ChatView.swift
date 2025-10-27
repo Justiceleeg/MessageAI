@@ -270,24 +270,29 @@ struct ChatView: View {
                                 _ = try await eventService.createEvent(event)
                                 print("Event stored in Firestore: \(event.title)")
                                 
-                                // Link event to chat if there are invitations
-                                if !event.invitations.isEmpty {
-                                    let invitation = event.invitations[conversationId]
-                                    if let invitation = invitation {
-                                        try await eventService.linkEventToChat(
-                                            eventId: event.eventId,
-                                            conversationId: conversationId,
-                                            messageId: messageId,
-                                            invitedUserIds: invitation.invitedUserIds
-                                        )
-                                        print("Event linked to chat with \(invitation.invitedUserIds.count) participants")
-                                    }
-                                }
+                                // Always update message metadata to mark it as having an event
+                                // This allows recipients to see RSVP buttons
+                                try await eventService.linkEventToChat(
+                                    eventId: event.eventId,
+                                    conversationId: conversationId,
+                                    messageId: messageId,
+                                    invitedUserIds: event.invitations[conversationId]?.invitedUserIds ?? []
+                                )
+                                print("Event linked to chat message")
                             } else {
                                 print("Backend event creation failed: \(backendResponse.message)")
                                 // Still store in Firestore as fallback
                                 _ = try await eventService.createEvent(event)
                                 print("Event stored in Firestore as fallback: \(event.title)")
+                                
+                                // IMPORTANT: Still link to message so RSVP buttons appear
+                                try await eventService.linkEventToChat(
+                                    eventId: event.eventId,
+                                    conversationId: conversationId,
+                                    messageId: messageId,
+                                    invitedUserIds: event.invitations[conversationId]?.invitedUserIds ?? []
+                                )
+                                print("Event linked to chat message (fallback)")
                             }
                         } catch {
                             print("Failed to create/store/link event: \(error.localizedDescription)")

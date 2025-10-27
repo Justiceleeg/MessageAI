@@ -134,23 +134,16 @@ struct MessageBubbleView<AIPrompt: View>: View {
             return false
         }
         
-        // Debug logging
-        print("🔧 DEBUG: shouldShowRSVPButtons - userRSVPStatus: \(userRSVPStatus?.rawValue ?? "nil")")
-        print("🔧 DEBUG: shouldShowRSVPButtons - eventDate: \(eventDate?.description ?? "nil")")
-        
         // Hide buttons if user has already RSVP'd
         if let rsvpStatus = userRSVPStatus, rsvpStatus != .pending {
-            print("🔧 DEBUG: Hiding buttons - user already RSVP'd: \(rsvpStatus.rawValue)")
             return false
         }
         
         // Hide buttons if event has passed
         if let eventDate = eventDate, eventDate < Date() {
-            print("🔧 DEBUG: Hiding buttons - event has passed")
             return false
         }
         
-        print("🔧 DEBUG: Showing RSVP buttons")
         return true
     }
     
