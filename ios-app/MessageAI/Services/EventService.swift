@@ -8,6 +8,7 @@
 import Foundation
 import FirebaseFirestore
 import OSLog
+import SwiftData
 
 /// Service responsible for Event CRUD operations and Firestore synchronization
 @MainActor
@@ -18,6 +19,108 @@ class EventService {
     private let db = Firestore.firestore()
     private let eventsCollection = "events"
     private let logger = Logger(subsystem: "com.jpw.message-ai", category: "EventService")
+    private let modelContext: ModelContext
+    private let networkMonitor = NetworkMonitor.shared
+    
+    // MARK: - Initialization
+    
+    init(modelContext: ModelContext? = nil) {
+        self.modelContext = modelContext ?? PersistenceController.shared.modelContainer.mainContext
+    }
+    
+    // MARK: - SwiftData Cache Helpers
+    
+    /// Cache an event to SwiftData
+    private func cacheEvent(_ event: Event) async {
+        do {
+            // Check if already exists
+            let predicate = #Predicate<EventEntity> { $0.eventId == event.eventId }
+            let descriptor = FetchDescriptor<EventEntity>(predicate: predicate)
+            
+            if let existing = try modelContext.fetch(descriptor).first {
+                modelContext.delete(existing)
+            }
+            
+            let eventEntity = EventEntity.from(event)
+            modelContext.insert(eventEntity)
+            try modelContext.save()
+            logger.debug("Event cached to SwiftData: \(event.eventId)")
+        } catch {
+            logger.error("Failed to cache event to SwiftData: \(error.localizedDescription)")
+        }
+    }
+    
+    /// Cache multiple events to SwiftData
+    private func cacheEvents(_ events: [Event]) async {
+        for event in events {
+            await cacheEvent(event)
+        }
+    }
+    
+    /// Retrieve event from SwiftData cache
+    private func getEventFromCache(id: String) -> Event? {
+        do {
+            let predicate = #Predicate<EventEntity> { $0.eventId == id }
+            let descriptor = FetchDescriptor<EventEntity>(predicate: predicate)
+            
+            if let cachedEntity = try modelContext.fetch(descriptor).first {
+                return cachedEntity.toEvent()
+            }
+        } catch {
+            logger.error("Failed to fetch event from cache: \(error.localizedDescription)")
+        }
+        return nil
+    }
+    
+    /// Retrieve events from SwiftData cache for a user
+    private func getEventsFromCache(userId: String) -> [Event] {
+        do {
+            let predicate = #Predicate<EventEntity> { $0.creatorUserId == userId }
+            let descriptor = FetchDescriptor<EventEntity>(
+                predicate: predicate,
+                sortBy: [SortDescriptor(\.date, order: .forward)]
+            )
+            
+            let entities = try modelContext.fetch(descriptor)
+            return entities.compactMap { $0.toEvent() }
+        } catch {
+            logger.error("Failed to fetch events from cache: \(error.localizedDescription)")
+            return []
+        }
+    }
+    
+    /// Retrieve events from SwiftData cache for a conversation
+    private func getEventsFromCacheForConversation(conversationId: String) -> [Event] {
+        do {
+            let predicate = #Predicate<EventEntity> { $0.createdInConversationId == conversationId }
+            let descriptor = FetchDescriptor<EventEntity>(
+                predicate: predicate,
+                sortBy: [SortDescriptor(\.date, order: .forward)]
+            )
+            
+            let entities = try modelContext.fetch(descriptor)
+            return entities.compactMap { $0.toEvent() }
+        } catch {
+            logger.error("Failed to fetch events from cache for conversation: \(error.localizedDescription)")
+            return []
+        }
+    }
+    
+    /// Delete event from SwiftData cache
+    private func deleteEventFromCache(id: String) {
+        do {
+            let predicate = #Predicate<EventEntity> { $0.eventId == id }
+            let descriptor = FetchDescriptor<EventEntity>(predicate: predicate)
+            
+            if let entity = try modelContext.fetch(descriptor).first {
+                modelContext.delete(entity)
+                try modelContext.save()
+                logger.debug("Event deleted from cache: \(id)")
+            }
+        } catch {
+            logger.error("Failed to delete event from cache: \(error.localizedDescription)")
+        }
+    }
     
     // MARK: - CRUD Methods
     
@@ -29,13 +132,16 @@ class EventService {
         logger.info("Creating event: \(event.eventId)")
         
         do {
-            // 1. Create event in Firestore
+            // 1. Cache locally first for optimistic UI
+            await cacheEvent(event)
+            
+            // 2. Create event in Firestore
             let docRef = db.collection(eventsCollection).document(event.eventId)
             let data = try Firestore.Encoder().encode(event)
             try await docRef.setData(data)
             logger.info("Event created successfully in Firestore: \(event.eventId)")
             
-            // 2. Index event in Pinecone for conflict detection
+            // 3. Index event in Pinecone for conflict detection
             await indexEventInPinecone(event)
             
             return event
@@ -53,6 +159,26 @@ class EventService {
     func getEvent(id: String) async throws -> Event? {
         logger.info("Fetching event: \(id)")
         
+        // 1. Try local cache first
+        if let cachedEvent = getEventFromCache(id: id) {
+            logger.info("Event found in cache: \(id)")
+            
+            // 2. Refresh from Firestore in background if online
+            if networkMonitor.isConnected {
+                Task {
+                    await refreshEventFromFirestore(id: id)
+                }
+            }
+            
+            return cachedEvent
+        }
+        
+        // 3. If not in cache, fetch from Firestore
+        return try await fetchAndCacheEvent(id: id)
+    }
+    
+    /// Fetch event from Firestore and cache it
+    private func fetchAndCacheEvent(id: String) async throws -> Event? {
         do {
             let docRef = db.collection(eventsCollection).document(id)
             let snapshot = try await docRef.getDocument()
@@ -64,11 +190,30 @@ class EventService {
             
             let event = try snapshot.data(as: Event.self)
             logger.info("Event fetched successfully: \(id)")
+            
+            // Cache the event
+            await cacheEvent(event)
+            
             return event
             
         } catch {
             logger.error("Failed to fetch event: \(error.localizedDescription)")
             throw error
+        }
+    }
+    
+    /// Refresh event from Firestore silently (background operation)
+    private func refreshEventFromFirestore(id: String) async {
+        do {
+            let docRef = db.collection(eventsCollection).document(id)
+            let snapshot = try await docRef.getDocument()
+            
+            if snapshot.exists, let event = try? snapshot.data(as: Event.self) {
+                await cacheEvent(event)
+                logger.debug("Event refreshed from Firestore: \(id)")
+            }
+        } catch {
+            logger.debug("Failed to refresh event from Firestore: \(error.localizedDescription)")
         }
     }
     
@@ -79,6 +224,13 @@ class EventService {
     func listEvents(userId: String) async throws -> [Event] {
         logger.info("Listing events for user: \(userId)")
         
+        // If offline, return cached events only
+        if !networkMonitor.isConnected {
+            logger.info("Offline mode - returning cached events for user: \(userId)")
+            return getEventsFromCache(userId: userId)
+        }
+        
+        // Online: fetch from Firestore and update cache
         do {
             let query = db.collection(eventsCollection)
                 .whereField("creatorUserId", isEqualTo: userId)
@@ -87,12 +239,17 @@ class EventService {
             let snapshot = try await query.getDocuments()
             let events = snapshot.documents.compactMap { try? $0.data(as: Event.self) }
             
+            // Cache all fetched events
+            await cacheEvents(events)
+            
             logger.info("Fetched \(events.count) events for user: \(userId)")
             return events
             
         } catch {
             logger.error("Failed to list events: \(error.localizedDescription)")
-            throw error
+            // Fallback to cache on error
+            logger.info("Falling back to cached events")
+            return getEventsFromCache(userId: userId)
         }
     }
     
@@ -186,6 +343,13 @@ class EventService {
     func listEventsForConversation(conversationId: String) async throws -> [Event] {
         logger.info("Listing events for conversation: \(conversationId)")
         
+        // If offline, return cached events only
+        if !networkMonitor.isConnected {
+            logger.info("Offline mode - returning cached events for conversation: \(conversationId)")
+            return getEventsFromCacheForConversation(conversationId: conversationId)
+        }
+        
+        // Online: fetch from Firestore and update cache
         do {
             let query = db.collection(eventsCollection)
                 .whereField("createdInConversationId", isEqualTo: conversationId)
@@ -194,12 +358,17 @@ class EventService {
             let snapshot = try await query.getDocuments()
             let events = snapshot.documents.compactMap { try? $0.data(as: Event.self) }
             
+            // Cache all fetched events
+            await cacheEvents(events)
+            
             logger.info("Fetched \(events.count) events for conversation: \(conversationId)")
             return events
             
         } catch {
             logger.error("Failed to list events for conversation: \(error.localizedDescription)")
-            throw error
+            // Fallback to cache on error
+            logger.info("Falling back to cached events")
+            return getEventsFromCacheForConversation(conversationId: conversationId)
         }
     }
     
@@ -210,13 +379,16 @@ class EventService {
         logger.info("Updating event: \(event.eventId)")
         
         do {
-            // 1. Update event in Firestore
+            // 1. Update cache first for optimistic UI
+            await cacheEvent(event)
+            
+            // 2. Update event in Firestore
             let docRef = db.collection(eventsCollection).document(event.eventId)
             let data = try Firestore.Encoder().encode(event)
             try await docRef.setData(data, merge: true)
             logger.info("Event updated successfully in Firestore: \(event.eventId)")
             
-            // 2. Update event in Pinecone
+            // 3. Update event in Pinecone
             await updateEventInPinecone(event)
             
         } catch {
@@ -233,13 +405,16 @@ class EventService {
         print("🗑️ DEBUG: EventService.deleteEvent called for: \(id)")
         
         do {
-            // 1. Delete event from Firestore
+            // 1. Delete from cache first
+            deleteEventFromCache(id: id)
+            
+            // 2. Delete event from Firestore
             let docRef = db.collection(eventsCollection).document(id)
             print("🗑️ DEBUG: Document reference: \(docRef.path)")
             try await docRef.delete()
             logger.info("Event deleted successfully from Firestore: \(id)")
             
-            // 2. Remove event from Pinecone
+            // 3. Remove event from Pinecone
             await removeEventFromPinecone(id)
             
         } catch {
@@ -408,6 +583,10 @@ class EventService {
             
             guard let snapshot = snapshot, snapshot.exists else {
                 self.logger.info("Event deleted or not found: \(id)")
+                // Delete from cache if it was removed
+                Task { @MainActor in
+                    self.deleteEventFromCache(id: id)
+                }
                 onChange(nil)
                 return
             }
@@ -415,6 +594,12 @@ class EventService {
             do {
                 let event = try snapshot.data(as: Event.self)
                 self.logger.info("Event updated via listener: \(id)")
+                
+                // Cache the updated event
+                Task { @MainActor in
+                    await self.cacheEvent(event)
+                }
+                
                 onChange(event)
             } catch {
                 self.logger.error("Failed to decode event: \(error.localizedDescription)")
@@ -449,6 +634,12 @@ class EventService {
             
             let events = snapshot.documents.compactMap { try? $0.data(as: Event.self) }
             self.logger.info("User events updated via listener: \(events.count) events")
+            
+            // Cache all events
+            Task { @MainActor in
+                await self.cacheEvents(events)
+            }
+            
             onChange(events)
         }
     }
@@ -493,6 +684,12 @@ class EventService {
             
             let events = snapshot.documents.compactMap { try? $0.data(as: Event.self) }
             self.logger.info("Conversation events updated via listener: \(events.count) events")
+            
+            // Cache all events
+            Task { @MainActor in
+                await self.cacheEvents(events)
+            }
+            
             onChange(events)
         }
     }

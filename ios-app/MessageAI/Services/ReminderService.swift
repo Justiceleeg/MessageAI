@@ -8,6 +8,7 @@
 import Foundation
 import FirebaseFirestore
 import OSLog
+import SwiftData
 
 /// Service responsible for Reminder CRUD operations and Firestore synchronization
 @MainActor
@@ -18,6 +19,114 @@ class ReminderService {
     private let db = Firestore.firestore()
     private let remindersCollection = "reminders"
     private let logger = Logger(subsystem: "com.jpw.message-ai", category: "ReminderService")
+    private let modelContext: ModelContext
+    private let networkMonitor = NetworkMonitor.shared
+    
+    // MARK: - Initialization
+    
+    init(modelContext: ModelContext? = nil) {
+        self.modelContext = modelContext ?? PersistenceController.shared.modelContainer.mainContext
+    }
+    
+    // MARK: - SwiftData Cache Helpers
+    
+    /// Cache a reminder to SwiftData
+    private func cacheReminder(_ reminder: Reminder) async {
+        do {
+            // Check if already exists
+            let predicate = #Predicate<ReminderEntity> { $0.reminderId == reminder.reminderId }
+            let descriptor = FetchDescriptor<ReminderEntity>(predicate: predicate)
+            
+            if let existing = try modelContext.fetch(descriptor).first {
+                modelContext.delete(existing)
+            }
+            
+            let reminderEntity = ReminderEntity.from(reminder)
+            modelContext.insert(reminderEntity)
+            try modelContext.save()
+            logger.debug("Reminder cached to SwiftData: \(reminder.reminderId)")
+        } catch {
+            logger.error("Failed to cache reminder to SwiftData: \(error.localizedDescription)")
+        }
+    }
+    
+    /// Cache multiple reminders to SwiftData
+    private func cacheReminders(_ reminders: [Reminder]) async {
+        for reminder in reminders {
+            await cacheReminder(reminder)
+        }
+    }
+    
+    /// Retrieve reminder from SwiftData cache
+    private func getReminderFromCache(id: String) -> Reminder? {
+        do {
+            let predicate = #Predicate<ReminderEntity> { $0.reminderId == id }
+            let descriptor = FetchDescriptor<ReminderEntity>(predicate: predicate)
+            
+            if let cachedEntity = try modelContext.fetch(descriptor).first {
+                return cachedEntity.toReminder()
+            }
+        } catch {
+            logger.error("Failed to fetch reminder from cache: \(error.localizedDescription)")
+        }
+        return nil
+    }
+    
+    /// Retrieve reminders from SwiftData cache for a user
+    private func getRemindersFromCache(userId: String, completed: Bool? = nil) -> [Reminder] {
+        do {
+            let predicate: Predicate<ReminderEntity>
+            if let completed = completed {
+                predicate = #Predicate<ReminderEntity> { $0.userId == userId && $0.completed == completed }
+            } else {
+                predicate = #Predicate<ReminderEntity> { $0.userId == userId }
+            }
+            
+            let descriptor = FetchDescriptor<ReminderEntity>(
+                predicate: predicate,
+                sortBy: [SortDescriptor(\.dueDate, order: .forward)]
+            )
+            
+            let entities = try modelContext.fetch(descriptor)
+            return entities.map { $0.toReminder() }
+        } catch {
+            logger.error("Failed to fetch reminders from cache: \(error.localizedDescription)")
+            return []
+        }
+    }
+    
+    /// Retrieve reminders from SwiftData cache for a conversation
+    private func getRemindersFromCacheForConversation(conversationId: String) -> [Reminder] {
+        do {
+            let predicate = #Predicate<ReminderEntity> { $0.conversationId == conversationId }
+            let descriptor = FetchDescriptor<ReminderEntity>(
+                predicate: predicate,
+                sortBy: [SortDescriptor(\.dueDate, order: .forward)]
+            )
+            
+            let entities = try modelContext.fetch(descriptor)
+            return entities.map { $0.toReminder() }
+        } catch {
+            logger.error("Failed to fetch reminders from cache for conversation: \(error.localizedDescription)")
+            return []
+        }
+    }
+    
+    /// Delete reminder from SwiftData cache
+    private func deleteReminderFromCache(id: String) {
+        do {
+            let predicate = #Predicate<ReminderEntity> { $0.reminderId == id }
+            let descriptor = FetchDescriptor<ReminderEntity>(predicate: predicate)
+            
+            if let entity = try modelContext.fetch(descriptor).first {
+                modelContext.delete(entity)
+                try modelContext.save()
+                logger.debug("Reminder deleted from cache: \(id)")
+            }
+        } catch {
+            logger.error("Failed to delete reminder from cache: \(error.localizedDescription)")
+        }
+    }
     
     // MARK: - CRUD Methods
     
@@ -29,6 +138,10 @@ class ReminderService {
         logger.info("Creating reminder: \(reminder.reminderId)")
         
         do {
+            // 1. Cache locally first for optimistic UI
+            await cacheReminder(reminder)
+            
+            // 2. Create reminder in Firestore
             let docRef = db.collection(remindersCollection).document(reminder.reminderId)
             let data = try Firestore.Encoder().encode(reminder)
             try await docRef.setData(data)
@@ -48,6 +161,26 @@ class ReminderService {
     func getReminder(id: String) async throws -> Reminder? {
         logger.info("Fetching reminder: \(id)")
         
+        // 1. Try local cache first
+        if let cachedReminder = getReminderFromCache(id: id) {
+            logger.info("Reminder found in cache: \(id)")
+            
+            // 2. Refresh from Firestore in background if online
+            if networkMonitor.isConnected {
+                Task {
+                    await refreshReminderFromFirestore(id: id)
+                }
+            }
+            
+            return cachedReminder
+        }
+        
+        // 3. If not in cache, fetch from Firestore
+        return try await fetchAndCacheReminder(id: id)
+    }
+    
+    /// Fetch reminder from Firestore and cache it
+    private func fetchAndCacheReminder(id: String) async throws -> Reminder? {
         do {
             let docRef = db.collection(remindersCollection).document(id)
             let snapshot = try await docRef.getDocument()
@@ -59,11 +192,30 @@ class ReminderService {
             
             let reminder = try snapshot.data(as: Reminder.self)
             logger.info("Reminder fetched successfully: \(id)")
+            
+            // Cache the reminder
+            await cacheReminder(reminder)
+            
             return reminder
             
         } catch {
             logger.error("Failed to fetch reminder: \(error.localizedDescription)")
             throw error
+        }
+    }
+    
+    /// Refresh reminder from Firestore silently (background operation)
+    private func refreshReminderFromFirestore(id: String) async {
+        do {
+            let docRef = db.collection(remindersCollection).document(id)
+            let snapshot = try await docRef.getDocument()
+            
+            if snapshot.exists, let reminder = try? snapshot.data(as: Reminder.self) {
+                await cacheReminder(reminder)
+                logger.debug("Reminder refreshed from Firestore: \(id)")
+            }
+        } catch {
+            logger.debug("Failed to refresh reminder from Firestore: \(error.localizedDescription)")
         }
     }
     
@@ -76,6 +228,13 @@ class ReminderService {
     func listReminders(userId: String, completed: Bool? = nil) async throws -> [Reminder] {
         logger.info("Listing reminders for user: \(userId), completed filter: \(String(describing: completed))")
         
+        // If offline, return cached reminders only
+        if !networkMonitor.isConnected {
+            logger.info("Offline mode - returning cached reminders for user: \(userId)")
+            return getRemindersFromCache(userId: userId, completed: completed)
+        }
+        
+        // Online: fetch from Firestore and update cache
         do {
             var query = db.collection(remindersCollection)
                 .whereField("userId", isEqualTo: userId)
@@ -89,12 +248,17 @@ class ReminderService {
             let snapshot = try await query.getDocuments()
             let reminders = snapshot.documents.compactMap { try? $0.data(as: Reminder.self) }
             
+            // Cache all fetched reminders
+            await cacheReminders(reminders)
+            
             logger.info("Fetched \(reminders.count) reminders for user: \(userId)")
             return reminders
             
         } catch {
             logger.error("Failed to list reminders: \(error.localizedDescription)")
-            throw error
+            // Fallback to cache on error
+            logger.info("Falling back to cached reminders")
+            return getRemindersFromCache(userId: userId, completed: completed)
         }
     }
     
@@ -105,6 +269,13 @@ class ReminderService {
     func listRemindersForConversation(conversationId: String) async throws -> [Reminder] {
         logger.info("Listing reminders for conversation: \(conversationId)")
         
+        // If offline, return cached reminders only
+        if !networkMonitor.isConnected {
+            logger.info("Offline mode - returning cached reminders for conversation: \(conversationId)")
+            return getRemindersFromCacheForConversation(conversationId: conversationId)
+        }
+        
+        // Online: fetch from Firestore and update cache
         do {
             let query = db.collection(remindersCollection)
                 .whereField("conversationId", isEqualTo: conversationId)
@@ -113,12 +284,17 @@ class ReminderService {
             let snapshot = try await query.getDocuments()
             let reminders = snapshot.documents.compactMap { try? $0.data(as: Reminder.self) }
             
+            // Cache all fetched reminders
+            await cacheReminders(reminders)
+            
             logger.info("Fetched \(reminders.count) reminders for conversation: \(conversationId)")
             return reminders
             
         } catch {
             logger.error("Failed to list reminders for conversation: \(error.localizedDescription)")
-            throw error
+            // Fallback to cache on error
+            logger.info("Falling back to cached reminders")
+            return getRemindersFromCacheForConversation(conversationId: conversationId)
         }
     }
     
@@ -129,6 +305,10 @@ class ReminderService {
         logger.info("Updating reminder: \(reminder.reminderId)")
         
         do {
+            // 1. Update cache first for optimistic UI
+            await cacheReminder(reminder)
+            
+            // 2. Update reminder in Firestore
             let docRef = db.collection(remindersCollection).document(reminder.reminderId)
             let data = try Firestore.Encoder().encode(reminder)
             try await docRef.setData(data, merge: true)
@@ -147,6 +327,10 @@ class ReminderService {
         logger.info("Deleting reminder: \(id)")
         
         do {
+            // 1. Delete from cache first
+            deleteReminderFromCache(id: id)
+            
+            // 2. Delete reminder from Firestore
             let docRef = db.collection(remindersCollection).document(id)
             try await docRef.delete()
             logger.info("Reminder deleted successfully: \(id)")
@@ -199,6 +383,10 @@ class ReminderService {
             
             guard let snapshot = snapshot, snapshot.exists else {
                 self.logger.info("Reminder deleted or not found: \(id)")
+                // Delete from cache if it was removed
+                Task { @MainActor in
+                    self.deleteReminderFromCache(id: id)
+                }
                 onChange(nil)
                 return
             }
@@ -206,6 +394,12 @@ class ReminderService {
             do {
                 let reminder = try snapshot.data(as: Reminder.self)
                 self.logger.info("Reminder updated via listener: \(id)")
+                
+                // Cache the updated reminder
+                Task { @MainActor in
+                    await self.cacheReminder(reminder)
+                }
+                
                 onChange(reminder)
             } catch {
                 self.logger.error("Failed to decode reminder: \(error.localizedDescription)")
@@ -240,6 +434,12 @@ class ReminderService {
             
             let reminders = snapshot.documents.compactMap { try? $0.data(as: Reminder.self) }
             self.logger.info("User reminders updated via listener: \(reminders.count) reminders")
+            
+            // Cache all reminders
+            Task { @MainActor in
+                await self.cacheReminders(reminders)
+            }
+            
             onChange(reminders)
         }
     }
