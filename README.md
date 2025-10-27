@@ -6,16 +6,89 @@ A production-quality iOS messaging app with real-time delivery, offline support,
 
 MessageAI is a modern messaging application inspired by WhatsApp's robust infrastructure. It provides fast, reliable real-time communication with a focus on user experience and technical excellence. The app features an offline-first architecture with optimistic UI updates, making it feel instantaneous even on poor network connections.
 
+## About This App
+
+MessageAI is an **AI-powered messaging platform** that goes beyond traditional chat apps by intelligently understanding your conversations. Built as a technical showcase project, it demonstrates production-grade iOS development, real-time synchronization, and cutting-edge AI integration.
+
+### 🧠 **AI-Powered Intelligence**
+
+The app uses **GPT-4** and **vector embeddings** to automatically extract actionable insights from your conversations:
+
+- **📅 Event Detection & Scheduling** - Automatically detects when you're planning events ("Let's meet Tuesday at 3pm") and creates calendar entries with conflict detection
+- **⏰ Smart Reminders** - Extracts reminders from natural language ("Remind me to call John tomorrow") and schedules local notifications
+- **✅ Decision Tracking** - Captures important decisions made in conversations for easy reference later
+- **🎯 Priority Detection** - Identifies urgent/important messages and highlights them appropriately
+- **🔗 Multi-Chat Event Linking** - Links the same event across multiple conversations (great for coordinating group activities)
+- **📍 RSVP Tracking** - Detects responses to event invitations and updates attendance status
+
+### 🏗️ **Architecture Highlights**
+
+**Frontend (iOS)**
+- **Swift 5.9+** with **SwiftUI** for modern, declarative UI
+- **SwiftData** for offline-first local persistence
+- **MVVM architecture** for clean separation of concerns
+- **Combine framework** for reactive data flow
+- **Real-time listeners** via Firebase Firestore
+
+**Backend (Python)**
+- **FastAPI** server for AI processing
+- **OpenAI GPT-4** for natural language understanding
+- **LangChain** for prompt engineering and AI workflows
+- **Pinecone** vector database for semantic search and conflict detection
+- **Firebase Firestore** for scalable real-time data sync
+
+### 💾 **Offline-First Design**
+
+MessageAI works seamlessly even without internet:
+
+- **Complete offline access** to messages, events, reminders, and decisions
+- **SwiftData caching** with automatic background sync when online
+- **Optimistic UI updates** for instant feedback
+- **Offline message queue** with automatic retry when reconnected
+- **Network-aware operations** that fallback gracefully to cached data
+
+### 🎨 **User Experience Features**
+
+- **Intelligent notifications** with smart suppression (no spam!)
+- **Message highlighting** - jump directly to events/reminders from calendar
+- **Read receipts** with delivery status tracking
+- **Presence indicators** - see who's online in real-time
+- **Theme support** - Light, Dark, or System default
+- **Group chat support** with multi-participant coordination
+- **Search & filter** for messages, events, and decisions
+
+### 🧪 **Technical Excellence**
+
+- **95+ unit tests** covering core functionality
+- **Integration tests** for Firebase services
+- **XCTest** and **XCUITest** for comprehensive coverage
+- **Modular architecture** with clear service boundaries
+- **Error handling** with graceful degradation
+- **Logging & observability** via OSLog
+- **Type-safe** Swift with minimal force unwrapping
+
+### 🚀 **What Makes This Special**
+
+1. **Production-Ready Code** - Not a tutorial project, but real production-quality architecture
+2. **AI Integration Done Right** - Backend processing keeps the iOS app fast and battery-efficient
+3. **Conflict Detection** - Vector similarity search prevents duplicate events
+4. **Multi-Modal AI** - Combines rule-based logic with LLM intelligence
+5. **Fully Offline Capable** - Works great even with spotty connections
+
+This app demonstrates the future of messaging: conversations that don't just store messages, but understand them and take action on your behalf.
+
 ## Tech Stack
 
 - **Frontend**: Swift 5.9+, SwiftUI
-- **Backend**: Firebase (Firestore, Auth, Realtime Database, Storage)
+- **Backend**: Firebase (Firestore, Auth, Storage) + Python FastAPI
+- **AI/ML**: OpenAI GPT-4, LangChain, Pinecone Vector DB
 - **Local Persistence**: SwiftData (iOS 17+)
 - **Testing**: XCTest, XCUITest
 - **Build Tool**: Xcode (Latest)
 
 ## Features
 
+### Core Messaging
 - **Real-time Messaging**: Instant message delivery with WebSocket-based synchronization
 - **One-on-One & Group Chat**: Direct messaging and multi-participant conversations
 - **Offline-First**: Access chat history and send messages without internet connection
@@ -30,6 +103,18 @@ MessageAI is a modern messaging application inspired by WhatsApp's robust infras
 - **Offline Message Queue**: Messages sent offline are queued and synced on reconnection
 - **Network Monitoring**: Automatic detection and handling of connectivity changes
 - **Profile Management**: User profiles with display names and settings
+
+### AI-Powered Features
+- **🤖 Automatic Event Extraction**: Detects events in natural language and creates calendar entries
+- **🔍 Smart Conflict Detection**: AI-powered vector search prevents double-booking
+- **🗓️ Multi-Chat Event Linking**: Same event across multiple conversations automatically links
+- **⏰ Intelligent Reminders**: Extracts and schedules reminders with local notifications
+- **✅ Decision Tracking**: Captures important decisions for easy reference
+- **📊 Priority Analysis**: Automatically identifies urgent/important messages
+- **📍 RSVP Detection**: Tracks attendance responses across conversations
+- **💬 Context-Aware AI**: GPT-4 understands conversation context and user intent
+- **🔗 Semantic Search**: Find related events/decisions using meaning, not just keywords
+- **📅 Calendar Integration**: Jump from calendar events directly to the original chat message
 
 ## Prerequisites
 
@@ -265,14 +350,26 @@ Clean and rebuild the project to use your new Firebase configuration.
 MessageAI/
 ├── ios-app/
 │   ├── MessageAI/              # Main iOS app
-│   │   ├── Models/             # Data models (User, Message, Conversation)
-│   │   ├── Views/              # SwiftUI views
+│   │   ├── Models/             # Data models & SwiftData entities
+│   │   ├── Views/              # SwiftUI views (Chat, Calendar, etc.)
 │   │   ├── ViewModels/         # View models (MVVM pattern)
-│   │   ├── Services/           # Business logic and Firebase integration
-│   │   ├── Persistence/        # SwiftData local storage
+│   │   ├── Services/           # Business logic & Firebase integration
+│   │   ├── Persistence/        # SwiftData persistence controller
 │   │   └── Utilities/          # Helper functions and extensions
 │   └── MessageAITests/         # Unit and integration tests
+├── python-backend/             # AI processing backend
+│   ├── app/
+│   │   ├── routes/            # FastAPI endpoints
+│   │   ├── services/          # AI services (OpenAI, Pinecone)
+│   │   └── models/            # Pydantic models
+│   └── tests/                 # Backend tests
+├── firebase/                   # Firebase configuration
+│   ├── firestore.rules        # Security rules
+│   └── firestore.indexes.json # Database indexes
 └── docs/                       # Project documentation
+    ├── architecture/          # Technical architecture docs
+    ├── prd/                   # Product requirements
+    └── stories/               # User stories
 ```
 
 ## Testing
