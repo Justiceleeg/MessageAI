@@ -413,21 +413,40 @@ class EventIndexingService:
         
         return " ".join(parts)
     
-    def _times_overlap(self, start1: str, end1: str, start2: str, end2: str) -> bool:
-        """Check if two time intervals overlap"""
+    def _times_overlap(self, date1: str, start1: str, end1: str, date2: str, start2: str, end2: str) -> bool:
+        """
+        Check if two time intervals overlap
+        
+        Args:
+            date1: Date of first event (YYYY-MM-DD format)
+            start1: Start time of first event (HH:MM format)
+            end1: End time of first event (HH:MM format)
+            date2: Date of second event (YYYY-MM-DD format)
+            start2: Start time of second event (HH:MM format)
+            end2: End time of second event (HH:MM format)
+            
+        Returns:
+            True if events overlap in both date AND time
+        """
         try:
-            if not all([start1, end1, start2, end2]):
+            if not all([date1, start1, end1, date2, start2, end2]):
                 return False
             
-            # Convert to datetime objects for comparison
-            dt1_start = datetime.fromisoformat(f"2000-01-01T{start1}:00")
-            dt1_end = datetime.fromisoformat(f"2000-01-01T{end1}:00")
-            dt2_start = datetime.fromisoformat(f"2000-01-01T{start2}:00")
-            dt2_end = datetime.fromisoformat(f"2000-01-01T{end2}:00")
+            # CRITICAL FIX: Dates must match for time overlap to matter
+            if date1 != date2:
+                return False
             
+            # Convert to datetime objects for comparison WITH actual dates
+            dt1_start = datetime.fromisoformat(f"{date1}T{start1}:00")
+            dt1_end = datetime.fromisoformat(f"{date1}T{end1}:00")
+            dt2_start = datetime.fromisoformat(f"{date2}T{start2}:00")
+            dt2_end = datetime.fromisoformat(f"{date2}T{end2}:00")
+            
+            # Check if time intervals overlap
             return dt1_start < dt2_end and dt2_start < dt1_end
             
-        except ValueError:
+        except ValueError as e:
+            logger.warning(f"Failed to parse datetime for overlap check: {e}")
             return False
     
     def _search_time_conflicts(self, detected_event: Dict[str, Any], user_id: str) -> List[Dict[str, Any]]:
@@ -455,20 +474,23 @@ class EventIndexingService:
             time_conflicts = []
             for doc, score in results:
                 metadata = doc.metadata
+                event_date = metadata.get("date", "")
                 
-                # Check if times overlap
-                if self._times_overlap(
-                    detected_start, detected_end,
-                    metadata.get("startTime", ""), metadata.get("endTime", "")
-                ):
-                    time_conflicts.append({
-                        "event_id": metadata.get("event_id"),
-                        "title": metadata.get("title"),
-                        "date": metadata.get("date"),
-                        "startTime": metadata.get("startTime"),
-                        "endTime": metadata.get("endTime"),
-                        "location": metadata.get("location")
-                    })
+                # CRITICAL FIX: Only check time overlap if dates match
+                if event_date == detected_date:
+                    # Check if times overlap
+                    if self._times_overlap(
+                        detected_date, detected_start, detected_end,
+                        event_date, metadata.get("startTime", ""), metadata.get("endTime", "")
+                    ):
+                        time_conflicts.append({
+                            "event_id": metadata.get("event_id"),
+                            "title": metadata.get("title"),
+                            "date": metadata.get("date"),
+                            "startTime": metadata.get("startTime"),
+                            "endTime": metadata.get("endTime"),
+                            "location": metadata.get("location")
+                        })
             
             return time_conflicts
             
