@@ -1271,16 +1271,29 @@ final class ChatViewModel: ObservableObject {
         // For group chats: listen to all participants
         let participantsToTrack: [String]
         if isGroupChat, let conversation = conversation {
-            // Group chat: track all participants except current user
+            // Existing group chat: track all participants except current user
             participantsToTrack = conversation.participants.filter { $0 != currentUserId }
-        } else {
-            // 1:1 chat: track the other user only
+        } else if isGroupChat, let groupParticipants = pendingGroupParticipants {
+            // New group chat: use pending participants
+            participantsToTrack = groupParticipants.map { $0.userId }.filter { $0 != currentUserId }
+        } else if !otherUserId.isEmpty {
+            // 1:1 chat: track the other user only (guard against empty userId)
             participantsToTrack = [otherUserId]
+        } else {
+            // No valid participants to track
+            logger.warning("Cannot start presence listening: No valid participants")
+            return
         }
         
         logger.info("Starting presence listeners for \(participantsToTrack.count) participants")
         
         for userId in participantsToTrack {
+            // Skip empty user IDs (safety check)
+            guard !userId.isEmpty else {
+                logger.warning("Skipping presence listener for empty userId")
+                continue
+            }
+            
             // Skip if already listening
             guard activePresenceListeners[userId] == nil else {
                 logger.debug("Already listening to presence for user \(userId)")
